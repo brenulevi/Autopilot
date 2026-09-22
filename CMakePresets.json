@@ -1,0 +1,48 @@
+{
+	"version": 2,
+	"cmakeMinimumRequired": {
+		"major": 3,
+		"minor": 20,
+		"patch": 0
+	},
+	"configurePresets": [
+		{
+			"name": "jsbsim-debug",
+			"displayName": "JSBSim Debug",
+			"description": "Configura o adaptador JSBSim em modo Debug.",
+			"generator": "Visual Studio 18 2026",
+			"binaryDir": "${sourceDir}/build/${presetName}",
+			"cacheVariables": {
+				"AUTOPILOT_TARGET": "JSBSIM",
+				"CMAKE_C_STANDARD": "11",
+				"CMAKE_CXX_STANDARD": "17",
+				"CMAKE_CXX_STANDARD_REQUIRED": true
+			}
+		},
+		{
+			"name": "jsbsim-release",
+			"displayName": "JSBSim Release",
+			"description": "Configura o adaptador JSBSim em modo Release.",
+			"generator": "Visual Studio 18 2026",
+			"binaryDir": "${sourceDir}/build/${presetName}",
+			"cacheVariables": {
+				"AUTOPILOT_TARGET": "JSBSIM",
+				"CMAKE_C_STANDARD": "11",
+				"CMAKE_CXX_STANDARD": "17",
+				"CMAKE_CXX_STANDARD_REQUIRED": true
+			}
+		}
+	],
+	"buildPresets": [
+		{
+			"name": "jsbsim-debug",
+			"configurePreset": "jsbsim-debug",
+			"configuration": "Debug"
+		},
+		{
+			"name": "jsbsim-release",
+			"configurePreset": "jsbsim-release",
+			"configuration": "Release"
+		}
+	]
+}
