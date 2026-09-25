@@ -1,0 +1,4 @@
+#pragma once
+
+inline constexpr char default_jsbsim_root[] = R"jsbsim(@AUTOPILOT_JSBSIM_DATA_DIR@)jsbsim";
+inline constexpr char flightgear_output_file[] = R"jsbsim(@CMAKE_CURRENT_SOURCE_DIR@/data/flightgear_output.xml)jsbsim";

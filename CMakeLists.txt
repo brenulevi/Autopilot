@@ -1,24 +1,25 @@
-cmake_minimum_required(VERSION 3.20)
+cmake_minimum_required(VERSION 3.24)
+project(Autopilot VERSION 0.1.0 LANGUAGES C)
 
-set(AUTOPILOT_TARGET "JSBSIM" CACHE STRING "Target autopilot to build for (JSBSIM, HELIUS, MSFS, XPLANE)")
-set_property(CACHE AUTOPILOT_TARGET PROPERTY STRINGS JSBSIM HELIUS MSFS XPLANE)
+option(AUTOPILOT_BUILD_SIM "Build the native JSBSim adapter and runner" ON)
+include(CTest)
 
-project(Autopilot VERSION 1.0.0 LANGUAGES C CXX)
+function(autopilot_warnings target)
+    if(MSVC)
+        target_compile_options(${target} PRIVATE /W4)
+    else()
+        target_compile_options(${target} PRIVATE -Wall -Wextra -Wpedantic)
+    endif()
+endfunction()
 
-set(CMAKE_C_STANDARD 11)
-set(CMAKE_C_STANDARD_REQUIRED ON)
-set(CMAKE_C_EXTENSIONS OFF)
-set(CMAKE_EXPORT_COMPILE_COMMANDS TRUE)
+add_subdirectory(autopilot)
 
-set(CMAKE_CXX_STANDARD 17)
-set(CMAKE_CXX_STANDARD_REQUIRED ON)
-set(CMAKE_CXX_EXTENSIONS ON)
+if(AUTOPILOT_BUILD_SIM)
+    enable_language(CXX)
+    include(cmake/JSBSim.cmake)
+    add_subdirectory(sim)
+endif()
 
-message(STATUS "Helius target: ${HELIUS_TARGET}")
-message(STATUS "Build type: ${CMAKE_BUILD_TYPE}")
-
-add_subdirectory(Autopilot)
-
-if(AUTOPILOT_TARGET STREQUAL "JSBSIM")
-    add_subdirectory(Simulation/JSBSim)
+if(BUILD_TESTING)
+    add_subdirectory(tests)
 endif()

@@ -1,1 +1,7 @@
-build/
+/build/
+/.deps/
+/logs/
+/CMakeUserPresets.json
+/.vs/
+/.venv/
+__pycache__/
