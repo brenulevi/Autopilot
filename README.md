@@ -4,16 +4,33 @@ Undergraduate flight-control project: a portable **C11 autopilot library**, a
 **C++17 JSBSim adapter**, and a native simulation runner built with **CMake**.
 The first aircraft is JSBSim's C172X. A representative Skyward model comes later.
 
+The project includes the complete H723 flight-controller firmware and F405 I/O
+firmware as planned deliverables. The portable libraries are their testable
+algorithm and protocol components. A feature described as a firmware
+responsibility is work to implement here, not an external project prerequisite.
+At present the libraries and host simulation exist; MCU firmware targets do not.
+
+The current priority is a complete waypoint-mission FCS validated in JSBSim,
+using simulator truth for state inputs. Firmware bring-up, the MCU link, and
+physical flash integration follow that milestone. Nearest-leg selection,
+Dubins entry capture, and APM3 fly-by/fly-over waypoint turns are implemented.
+The next simulation work is systematic validation across turns,
+altitude/speed changes, wind, and aircraft models, followed by mission
+completion behavior and state-estimation integration.
+
 The C library supports **manual passthrough**, **roll hold**, **pitch attitude
-hold**, **combined attitude hold**, **attitude plus true-airspeed hold**, and
-**altitude plus true-airspeed hold**.
+hold**, **combined attitude hold**, **attitude plus true-airspeed hold**,
+**altitude plus true-airspeed hold**, and **waypoint mission guidance**.
 The runner can apply open-loop control pulses, then test the loops in JSBSim.
 
 ## Structure
 
 ```text
+common/                    Shared types and binary flight logger (Flight::Common)
+flight_io/                 Portable C11 RC, authority, and output mapping (Flight::IO)
 autopilot/                 C library; no JSBSim, OS, heap, or board dependencies
   include/autopilot/autopilot.h  Public ap_step() API and mode/configuration types
+  include/autopilot/mission.h    Compiled-mission decoder and L1 guidance API
   include/autopilot/control/actuators.h  Normalized actuator-command type
   include/autopilot/estimation/state.h   State interface for simulator/estimator
   src/autopilot.c         Input validation and mode dispatch
@@ -24,10 +41,28 @@ autopilot/                 C library; no JSBSim, OS, heap, or board dependencies
   src/guidance/bank.c     Limits the requested bank angle
   src/guidance/pitch.c    Limits the requested pitch angle
   src/guidance/altitude.c Produces a pitch request from altitude and climb rate
+  src/mission.c           APM2/APM3 decoder, capture, turns, and L1 guidance
+  src/path.c              Planar Dubins path geometry
 sim/                      C++ JSBSim adapter and command-line runner
+missions/                 Editable JSON mission examples
+tools/compile_mission.py  Host-side JSON-to-APM2/APM3 compiler
 cmake/JSBSim.cmake         Pinned dependency and optional local source override
 tests/                    C API checks and a real C172X integration check
 ```
+
+`autopilot/` and `flight_io/` share `flight_controls_t` through `common/`;
+`ap_controls_t` remains a compatibility alias. Neither library depends on the
+other. Flight I/O provides iBUS decoding, configurable RC calibration, explicit
+pilot/autopilot selection with stale-command fallback and re-engagement latching,
+and actuator mixing into pulse-width demands. STM32 UART/timer drivers and the
+MCU-to-MCU wire protocol remain firmware work. See the
+[Flight I/O guide](flight_io/README.md) for its API, policy, and F405/H723 boundary.
+
+Both firmware applications can use the shared **FLG1 binary flight logger**, with
+source/session IDs, local timestamps, sequence numbers, CRCs, and a copying
+enqueue callback. A PC decoder exports flash dumps to CSV. See
+[flight logging](docs/flight_logging.md) for the format, usage, and remaining
+firmware queue/flash/download work. The existing simulator CSV is unchanged.
 
 Each simulation tick reads JSBSim state, calls the C autopilot, applies the
 returned commands through the adapter, and advances the aircraft by 0.01 seconds.
@@ -39,8 +74,8 @@ modules have private headers and can evolve without changing callers. The
 `estimation/state.h` file defines the state passed into control; it does not
 implement an estimator yet. JSBSim currently fills that structure with exact
 simulated state. When sensors are added, the estimator can populate the same
-structure. Guidance currently limits attitude commands; course/waypoint
-guidance can eventually produce bank commands upstream of attitude control.
+structure. Mission guidance produces a bank request upstream of attitude
+control. It uses simulator position and ground velocity, not an estimator yet.
 
 ## Build
 
@@ -83,10 +118,27 @@ cmake -S . -B build/board -DCMAKE_TOOLCHAIN_FILE=<your-toolchain.cmake> -DAUTOPI
 cmake --build build/board --target autopilot
 ```
 
-This produces the C library; board startup, drivers, linker script, and flashing
-are intentionally left to the hardware project.
+This currently produces the C library. Board startup, drivers, linker scripts,
+and flashing targets will be added as this project's firmware implementation.
+The command above does not yet build a flashable MCU application.
 
 ## First experiment
+
+Aircraft control/guidance settings can now be loaded from an **80-byte binary
+APCF file**, with version, sequence number, and CRC32. The C codec is portable
+to future EEPROM storage; the host tool reads/writes files without JSON.
+
+```powershell
+./build/host/bin/Debug/autopilot_config.exe show configs/c172x.apcf
+./build/host/bin/Debug/autopilot_config.exe set configs/c172x.apcf logs/c172x_tuned.apcf roll_angle_gain=3 roll_rate_gain=0.6
+./build/host/bin/Debug/autopilot_sim.exe --config logs/c172x_tuned.apcf --mode roll-hold --output logs/configured_roll.csv
+```
+
+Explicit gain options override loaded values regardless of argument order.
+Without `--config`, the existing defaults apply. The supplied profile is for
+the C172X simulation, not Skyward. The writer refuses existing output paths.
+See [binary configuration](docs/configuration.md) for creation, the wire format,
+validation rules, and the firmware/library boundary.
 
 ```powershell
 ./build/host/bin/Debug/autopilot_sim.exe --aileron-pulse 0 --output logs/baseline.csv
@@ -345,6 +397,103 @@ The pitch offset limiter and elevator may activate briefly immediately after
 the altitude steps. This uses perfect simulated state and no wind or sensor
 noise; it is not a flight validation.
 
+## Compiled waypoint mission
+
+Mission engagement selects the nearest route leg, allowing earlier waypoints to
+be skipped, and uses a Dubins entry when needed to join it in the forward
+direction. Starting position and heading are configurable in JSBSim. See
+[mission capture](docs/mission_capture.md) for the policy, implementation,
+repeatable offset-start commands, and trajectory plots.
+
+Edit `missions/c172x_line.json`, then compile it on the PC with Python 3.10+.
+The compiler uses only the standard library:
+
+```powershell
+python tools/compile_mission.py missions/c172x_line.json logs/c172x_line.apm
+./build/host/bin/Debug/autopilot_sim.exe --mode mission --mission logs/c172x_line.apm --duration 90 --output logs/c172x_mission.csv
+```
+
+On Linux/macOS, use `python3` and the executable without `.exe`. The sample
+starts at latitude 30 degrees, longitude 0 degrees, at 3000 ft MSL and the
+trimmed C172X airspeed. Each waypoint has `lat_deg` and `lon_deg` in decimal
+degrees, an MSL `altitude_m`, and a **true** `airspeed_m_s`. The first waypoint
+anchors the local frame and should be near the initialized aircraft. A mission
+needs 2–32 waypoints; adjacent points must be at least 1 m apart. The current
+short-route projection limits waypoints to ±20 km north/east of the first one.
+
+The compiler checks the source and writes a versioned `APM2` or `APM3` binary: a 12-byte
+header, 16-byte records, and a trailing CRC32. Latitude and longitude are
+stored as integer degrees × 10⁷; altitude and speed use centimeters and
+centimeters/second. The C library checks version, exact length, CRC, reserved
+fields, and waypoint bounds. On load, `ap_mission_decode()` derives local
+north/east coordinates from the stored lat/lon; it does not require the PC
+compiler to supply local coordinates. The binary is separate from the
+firmware/library build, and the decoder takes caller-owned bytes for a future
+board storage interface. Older `APM1` files are intentionally rejected; convert
+their waypoint sources to lat/lon and recompile.
+
+At each tick, the adapter supplies geodetic position and **ground** velocity.
+The C mission code projects aircraft position into the same local frame.
+`ap_mission_step()` chooses a lookahead target on the active line leg, requests
+lateral acceleration using `2 × groundspeed² × sin(course error) / lookahead`,
+and converts that acceleration to a bounded bank command. Its default lookahead
+is `max(30 m, 4 s × groundspeed)`; experiment with `--l1-period-s 1..30`.
+The existing altitude/airspeed and attitude loops track the mission's altitude,
+true airspeed, and bank requests. The CSV adds `lat_deg`, `lon_deg`, derived
+`north_m`/`east_m`, ground velocity, `cross_track_m`, and `mission_leg` columns.
+A positive cross-track
+value means right of the directed line. The runner stops at the final waypoint
+and prints `Mission complete`; if `--duration` expires first, it prints
+`Mission incomplete` and exits with status 2. The CSV is kept for inspection.
+
+The current route geometry supports straight legs plus per-waypoint fly-by and
+fly-over turns. Gust/turbulence studies, mission upload,
+takeoff/landing, loss-of-navigation handling, and an onboard safe mode are not
+implemented. In particular, the runner stopping at the final waypoint is a
+simulation behavior, not an aircraft action. The C172X gains and route are
+simulation examples, not settings for the Skyward. The current turn-radius planner is a fixed-speed/bank
+approximation that still needs validation over different speeds, winds, route
+corners, and aircraft models.
+
+### Steady-wind mission comparison
+
+The JSBSim runner accepts steady wind components in meters/second; positive
+values mean the wind blows toward north or east. Wind is applied immediately
+after trim, as a step at simulation time zero. The magnitude of the north/east
+vector is limited to 20 m/s. This is a controlled simulation disturbance, not
+a turbulence model or a Skyward wind limit. Run the same compiled mission in
+calm air and with crosswind from both directions:
+
+```powershell
+./build/host/bin/Debug/autopilot_sim.exe --mode mission --mission logs/c172x_line.apm --duration 120 --wind-east-m-s 0 --output logs/mission_calm.csv
+./build/host/bin/Debug/autopilot_sim.exe --mode mission --mission logs/c172x_line.apm --duration 120 --wind-east-m-s 5 --output logs/mission_east5.csv
+./build/host/bin/Debug/autopilot_sim.exe --mode mission --mission logs/c172x_line.apm --duration 120 --wind-east-m-s -5 --output logs/mission_west5.csv
+python tools/mission_metrics.py logs/mission_calm.csv logs/mission_east5.csv logs/mission_west5.csv --output logs/mission_wind_comparison.json
+```
+
+`--wind-north-m-s` is available too, including in non-mission modes. CSV logs
+record both commanded steady wind components. The metrics tool reports
+cross-track RMS/peak error, final-10-second cross-track error, ground-speed
+minimum, control saturation counts, and maximum altitude and airspeed errors.
+Mission completion comes from the runner's exit status: zero means the final
+waypoint was reached, while status 2 means the duration elapsed first.
+
+Historical C172X baseline before nearest-leg capture and the revised terminal
+acceptance circle: all three runs completed. Timing below uses that earlier
+completion criterion; regenerate metrics when comparing the current code.
+
+| East wind (m/s) | Completion (s) | Cross-track RMS (m) | Peak cross-track (m) | Final 10 s RMS (m) |
+| ---: | ---: | ---: | ---: | ---: |
+| 0 | 71.68 | 2.58 | 22.25 | 0.044 |
+| +5 | 71.33 | 2.60 | 22.12 | 0.051 |
+| -5 | 72.61 | 2.54 | 22.11 | 0.032 |
+
+The peak is concentrated around the leg transition. Aileron saturation lasted
+about 0.34–0.35 s in each run; these experiments do not establish acceptable
+limits for the physical aircraft. The ±5 m/s crosswind case is now part of the
+JSBSim integration test. Next, vary airspeed, wind direction/magnitude, and
+route corner angle before using these results to tune lookahead and plan turns.
+
 ## Live FlightGear visualization
 
 FlightGear is a visual display for the same standalone JSBSim C172X simulation;
@@ -428,16 +577,18 @@ right, down. Altitude is meters above mean sea level, positive up. The adapter
 owns JSBSim's feet-to-meters conversion. Commands map to the C172X `fcs/*-cmd-norm`
 properties; future board drivers must define physical servo directions and travel.
 
-Next: evaluate the coupled altitude, attitude, and airspeed loops under
-disturbances and changed conditions. Later, replace simulator truth with
+Next: expand the mission matrix to changed speed, wind direction, lookahead
+period, sharper route corners, and mixed fly-by/fly-over sequences. Add explicit
+mission-end actions and failure handling, then replace simulator truth with
 estimator outputs and introduce a Skyward model.
 This project does not yet validate hardware for flight.
 
 Tests cover manual passthrough, feedback/damping direction, command and actuator
-limits, PI anti-windup, altitude guidance, invalid inputs, overflow, and mode switching. JSBSim
+limits, PI anti-windup, altitude and mission guidance, mission decoding,
+invalid inputs, overflow, and mode switching. JSBSim
 integration tests cover trim drift, SI conversion, the open-loop aileron
 response, independent and combined attitude loops, true-airspeed steps,
-and altitude steps with a banked segment.
+altitude steps with a banked segment, and a two-leg mission.
 After splitting the C modules, the manual-run CSV matched the prior run exactly;
 the roll-run state and command differences from floating-point evaluation order
 were below 0.000004 degrees of bank and 0.0000002 normalized aileron command.
@@ -451,6 +602,12 @@ Plot-metric tests are separate from CMake so Python remains optional:
 They check overshoot direction, settling after leaving and reentering the band,
 and explicit reporting of an unsettled response. These are software/model checks,
 not validation against a physical aircraft.
+
+The separate mission-compiler test uses only the Python standard library:
+
+```powershell
+python tests/test_mission_compile.py
+```
 
 ## References
 
