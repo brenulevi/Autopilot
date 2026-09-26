@@ -1,6 +1,8 @@
 #include "sim/jsbsim_adapter.hpp"
 #include "sim/c172x_config.hpp"
+#include "sim/config_file.hpp"
 #include "sim_config.h"
+#include "autopilot/mission.h"
 
 #include <cmath>
 #include <chrono>
@@ -11,6 +13,7 @@
 #include <stdexcept>
 #include <string>
 #include <thread>
+#include <vector>
 
 namespace {
 constexpr double dt_s = 0.01;
@@ -33,6 +36,9 @@ int main(int argc, char** argv)
     try {
         std::string data_root = default_jsbsim_root;
         std::filesystem::path output;
+        std::filesystem::path mission_path;
+        std::filesystem::path config_path;
+        bool config_path_set = false;
         double duration_s = 0.0;
         bool duration_set = false;
         double pulse = 0.05;
@@ -44,13 +50,19 @@ int main(int argc, char** argv)
         double speed_step_m_s = 1.0;
         double altitude_step_m = 5.0;
         double turn_bank_deg = 0.0;
+        double l1_period_s = 4.0;
+        double wind_north_m_s = 0.0;
+        double wind_east_m_s = 0.0;
+        sim::InitialPosition start;
         std::string mode = "manual";
         auto config = sim::c172x_config;
+        std::vector<std::pair<float ap_config_t::*, float>> config_overrides;
         bool roll_options_set = false;
         bool pitch_options_set = false;
         bool speed_options_set = false;
         bool speed_step_set = false;
         bool altitude_options_set = false;
+        bool l1_period_set = false;
         bool aileron_pulse_set = false;
         bool elevator_pulse_set = false;
         bool throttle_pulse_set = false;
@@ -59,8 +71,12 @@ int main(int argc, char** argv)
             const std::string option = argv[i];
             if (option == "--help") {
                 std::cout << "Usage: autopilot_sim [--jsbsim-root PATH] [--output FILE]\n"
+                             "                     [--config FILE.apcf]\n"
                              "                     [--duration SECONDS] [--aileron-pulse VALUE|--elevator-pulse VALUE|--throttle-pulse VALUE]\n"
-                             "                     [--mode manual|roll-hold|pitch-hold|attitude-hold|attitude-airspeed-hold|altitude-hold]\n"
+                             "                     [--mode manual|roll-hold|pitch-hold|attitude-hold|attitude-airspeed-hold|altitude-hold|mission]\n"
+                             "                     [--mission FILE] [--l1-period-s SECONDS]\n"
+                             "                     [--wind-north-m-s VALUE] [--wind-east-m-s VALUE]\n"
+                             "                     [--start-lat-deg VALUE] [--start-lon-deg VALUE] [--start-heading-deg VALUE]\n"
                              "                     [--bank-deg DEGREES] [--pitch-deg DEGREES]\n"
                              "                     [--airspeed-kts KNOTS] (80 to 120)\n"
                              "                     [--roll-kp GAIN] [--roll-kd GAIN]\n"
@@ -83,7 +99,12 @@ int main(int argc, char** argv)
                              "during [2, 30) s, then return. Duration 60 s.\n"
                              "Altitude hold: +/- altitude step during [2, 30) s;\n"
                              "optional banked segment [40, 60) s. Duration 90 s.\n"
-                             "Bank commands are limited to +/-20 degrees; aileron to +/-0.5.\n"
+                             "Mission: airborne; APM3 fly-by/fly-over waypoints (APM2 also accepted).\n"
+                             "Mission entry captures the nearest route leg; earlier waypoints may be skipped.\n"
+                             "Start defaults to 30 N, 0 E, heading 0 deg; heading range [0,360).\n"
+                             "Wind components are positive toward north/east; total steady wind <=20 m/s.\n"
+                             "Default bank limit is +/-20 degrees; default aileron limit is +/-0.5.\n"
+                             "--config loads a validated binary APCF profile; explicit gain/L1 options override it.\n"
                              "Gains use radians, not degrees. Existing CSV files are overwritten.\n"
                              "--flightgear sends native FDM to localhost UDP 5600 at 50 Hz\n"
                              "and paces the simulation in real time. Start FlightGear first.\n";
@@ -99,6 +120,18 @@ int main(int argc, char** argv)
             const std::string value = argv[++i];
             if (option == "--jsbsim-root") data_root = value;
             else if (option == "--output") output = value;
+            else if (option == "--mission") mission_path = value;
+            else if (option == "--config") {
+                if (config_path_set || value.empty())
+                    throw std::invalid_argument("Specify one nonempty --config path");
+                config_path = value; config_path_set = true;
+            }
+            else if (option == "--l1-period-s") { l1_period_s = number(value); l1_period_set = true; }
+            else if (option == "--wind-north-m-s") wind_north_m_s = number(value);
+            else if (option == "--wind-east-m-s") wind_east_m_s = number(value);
+            else if (option == "--start-lat-deg") start.latitude_deg = number(value);
+            else if (option == "--start-lon-deg") start.longitude_deg = number(value);
+            else if (option == "--start-heading-deg") start.heading_deg = number(value);
             else if (option == "--duration") { duration_s = number(value); duration_set = true; }
             else if (option == "--airspeed-kts") airspeed_kts = number(value);
             else if (option == "--speed-step-m-s") { speed_step_m_s = number(value); speed_step_set = true; }
@@ -123,33 +156,50 @@ int main(int argc, char** argv)
             else if (option == "--bank-deg") { bank_deg = number(value); roll_options_set = true; }
             else if (option == "--pitch-deg") { pitch_deg = number(value); pitch_options_set = true; }
             else if (option == "--roll-kp") {
-                config.roll_angle_gain = static_cast<float>(number(value)); roll_options_set = true;
+                config_overrides.emplace_back(&ap_config_t::roll_angle_gain, static_cast<float>(number(value))); roll_options_set = true;
             }
             else if (option == "--roll-kd") {
-                config.roll_rate_gain = static_cast<float>(number(value)); roll_options_set = true;
+                config_overrides.emplace_back(&ap_config_t::roll_rate_gain, static_cast<float>(number(value))); roll_options_set = true;
             }
             else if (option == "--pitch-kp") {
-                config.pitch_angle_gain = static_cast<float>(number(value)); pitch_options_set = true;
+                config_overrides.emplace_back(&ap_config_t::pitch_angle_gain, static_cast<float>(number(value))); pitch_options_set = true;
             }
             else if (option == "--pitch-kd") {
-                config.pitch_rate_gain = static_cast<float>(number(value)); pitch_options_set = true;
+                config_overrides.emplace_back(&ap_config_t::pitch_rate_gain, static_cast<float>(number(value))); pitch_options_set = true;
             }
             else if (option == "--speed-kp") {
-                config.airspeed_kp = static_cast<float>(number(value)); speed_options_set = true;
+                config_overrides.emplace_back(&ap_config_t::airspeed_kp, static_cast<float>(number(value))); speed_options_set = true;
             }
             else if (option == "--speed-ki") {
-                config.airspeed_ki = static_cast<float>(number(value)); speed_options_set = true;
+                config_overrides.emplace_back(&ap_config_t::airspeed_ki, static_cast<float>(number(value))); speed_options_set = true;
             }
             else if (option == "--altitude-kh") {
-                config.altitude_gain = static_cast<float>(number(value)); altitude_options_set = true;
+                config_overrides.emplace_back(&ap_config_t::altitude_gain, static_cast<float>(number(value))); altitude_options_set = true;
             }
             else if (option == "--altitude-kv") {
-                config.climb_rate_gain = static_cast<float>(number(value)); altitude_options_set = true;
+                config_overrides.emplace_back(&ap_config_t::climb_rate_gain, static_cast<float>(number(value))); altitude_options_set = true;
             }
             else throw std::invalid_argument("Unknown option: " + option);
         }
+        uint32_t config_sequence = 0;
+        if (config_path_set) {
+            const auto loaded = sim::load_config(config_path);
+            config = loaded.control;
+            config_sequence = loaded.sequence;
+            if (!l1_period_set) l1_period_s = loaded.l1_period_s;
+        }
+        for (const auto& override_value : config_overrides)
+            config.*(override_value.first) = override_value.second;
+        const ap_aircraft_config_t effective_config{config, static_cast<float>(l1_period_s), config_sequence};
+        if (!ap_config_validate(&effective_config))
+            throw std::invalid_argument("Invalid effective aircraft configuration");
+        if (config_path_set)
+            std::cout << "Loaded configuration: " << config_path.string() << " (sequence "
+                      << config_sequence << "); explicit gain/L1 options override file values.\n";
+
         if (mode != "manual" && mode != "roll-hold" && mode != "pitch-hold" &&
-            mode != "attitude-hold" && mode != "attitude-airspeed-hold" && mode != "altitude-hold") {
+            mode != "attitude-hold" && mode != "attitude-airspeed-hold" &&
+            mode != "altitude-hold" && mode != "mission") {
             throw std::invalid_argument("Unknown control mode");
         }
         const bool roll_hold = mode == "roll-hold";
@@ -157,27 +207,31 @@ int main(int argc, char** argv)
         const bool attitude_hold = mode == "attitude-hold";
         const bool speed_hold = mode == "attitude-airspeed-hold";
         const bool altitude_hold = mode == "altitude-hold";
-        const bool speed_active = speed_hold || altitude_hold;
+        const bool mission_mode = mode == "mission";
+        const bool altitude_active = altitude_hold || mission_mode;
+        const bool speed_active = speed_hold || altitude_active;
         const bool roll_active = roll_hold || attitude_hold || speed_active;
         const bool pitch_active = pitch_hold || attitude_hold || speed_active;
         if ((mode != "manual" && (aileron_pulse_set || elevator_pulse_set)) ||
             (mode != "manual" && mode != "attitude-hold" && throttle_pulse_set) ||
-            (mode != "roll-hold" && mode != "attitude-hold" && !altitude_hold && roll_options_set) ||
-            (mode != "pitch-hold" && mode != "attitude-hold" && !altitude_hold && pitch_options_set) ||
+            (mode != "roll-hold" && mode != "attitude-hold" && !altitude_active && roll_options_set) ||
+            (mode != "pitch-hold" && mode != "attitude-hold" && !altitude_active && pitch_options_set) ||
             (!speed_active && speed_options_set) ||
             (!speed_hold && speed_step_set) ||
             (!altitude_hold && altitude_options_set) ||
+            (mission_mode != !mission_path.empty()) ||
             (static_cast<int>(aileron_pulse_set) + static_cast<int>(elevator_pulse_set) +
              static_cast<int>(throttle_pulse_set) > 1)) {
             throw std::invalid_argument("Pulse and attitude options must match their modes; choose one pulse axis");
         }
         if (!duration_set) duration_s = mode == "manual" ? 10.0 :
-            (altitude_hold ? 90.0 : (speed_hold ? 60.0 : 20.0));
-        if (output.empty()) output = altitude_hold ? "logs/c172x_altitude_hold.csv" :
+            (altitude_active ? 90.0 : (speed_hold ? 60.0 : 20.0));
+        if (output.empty()) output = mission_mode ? "logs/c172x_mission.csv" :
+            (altitude_hold ? "logs/c172x_altitude_hold.csv" :
             (speed_hold ? "logs/c172x_airspeed_hold.csv" :
             (attitude_hold ? "logs/c172x_attitude_hold.csv" :
             (roll_hold ? "logs/c172x_roll_hold.csv" :
-            (pitch_hold ? "logs/c172x_pitch_hold.csv" : "logs/c172x_pulse.csv"))));
+            (pitch_hold ? "logs/c172x_pitch_hold.csv" : "logs/c172x_pulse.csv")))));
         if (duration_s < dt_s || duration_s > 3600.0 || std::abs(pulse) > 1.0 ||
             std::abs(elevator_pulse) > 1.0 || std::abs(throttle_pulse) > 1.0) {
             throw std::invalid_argument("Duration must be in [0.01, 3600] s and pulses in [-1, 1]");
@@ -205,14 +259,47 @@ int main(int argc, char** argv)
             !std::isfinite(config.climb_rate_gain) || config.climb_rate_gain < 0.0f) {
             throw std::invalid_argument("Altitude step must be within +/-20 m, turn bank within +/-15 deg, and altitude gains valid");
         }
+        if (l1_period_s < 1.0 || l1_period_s > 30.0 || (!mission_mode && l1_period_set)) {
+            throw std::invalid_argument("L1 period must be in [1, 30] s and requires mission mode");
+        }
+        if (std::hypot(wind_north_m_s, wind_east_m_s) > 20.0) {
+            throw std::invalid_argument("Steady wind magnitude must be at most 20 m/s");
+        }
+        if (config_path_set && std::filesystem::exists(output) &&
+            std::filesystem::equivalent(output, config_path))
+            throw std::invalid_argument("CSV output must not overwrite the input configuration");
+
+        ap_mission_t mission{};
+        ap_mission_runtime_t mission_runtime{};
+        if (mission_mode) {
+            std::ifstream file(mission_path, std::ios::binary | std::ios::ate);
+            if (!file) throw std::runtime_error("Cannot open compiled mission: " + mission_path.string());
+            const auto length = file.tellg();
+            if (length < 0 || length > 16 + 16 * static_cast<std::streamoff>(AP_MISSION_MAX_WAYPOINTS))
+                throw std::runtime_error("Invalid compiled mission size");
+            std::vector<uint8_t> bytes(static_cast<std::size_t>(length));
+            file.seekg(0);
+            file.read(reinterpret_cast<char*>(bytes.data()), length);
+            if (!file || !ap_mission_decode(bytes.data(), bytes.size(), &mission))
+                throw std::runtime_error("Invalid compiled mission format, CRC, or waypoint values");
+        }
 
         sim::JsbsimAdapter aircraft(data_root, dt_s,
-                                   flightgear ? flightgear_output_file : "", airspeed_kts);
+                                   flightgear ? flightgear_output_file : "", airspeed_kts,
+                                   wind_north_m_s, wind_east_m_s, start);
+        const auto steady_wind = aircraft.steady_wind_m_s();
         const auto trim = aircraft.trim_controls();
         const float initial_bank = aircraft.state().roll_rad;
         const float initial_pitch = aircraft.state().pitch_rad;
         const float initial_speed = aircraft.state().airspeed_m_s;
         const float initial_altitude = aircraft.state().altitude_m;
+        if (mission_mode) {
+            const auto nav = aircraft.navigation_state();
+            float north_m = 0.0f, east_m = 0.0f;
+            if (!nav.valid || !ap_mission_project(&mission, nav.lat_e7, nav.lon_e7,
+                                                  &north_m, &east_m))
+                throw std::runtime_error("Aircraft start is outside the mission's local projection bounds");
+        }
         ap_runtime_t runtime{};
         if (output.has_parent_path()) std::filesystem::create_directories(output.parent_path());
         std::ofstream csv(output);
@@ -229,7 +316,9 @@ int main(int argc, char** argv)
                "throttle_saturated,speed_kp,speed_ki,speed_integral_norm,"
                "throttle_min_norm,throttle_max_norm,climb_rate_m_s,"
                "altitude_request_m,altitude_command_m,altitude_error_m,"
-               "altitude_pitch_limited,altitude_kh,altitude_kv,max_pitch_offset_rad\n";
+               "altitude_pitch_limited,altitude_kh,altitude_kv,max_pitch_offset_rad,"
+               "lat_deg,lon_deg,north_m,east_m,ground_north_m_s,ground_east_m_s,"
+               "cross_track_m,mission_leg,wind_north_m_s,wind_east_m_s,mission_phase,mission_target_distance_m,waypoint_type\n";
         csv << std::setprecision(10);
 
         const auto steps = static_cast<unsigned long long>(std::ceil(duration_s / dt_s));
@@ -238,9 +327,19 @@ int main(int argc, char** argv)
                       << duration_s << " s.\n" << std::flush;
         }
         const auto wall_start = std::chrono::steady_clock::now();
+        bool mission_completed = false;
         for (unsigned long long k = 0; k < steps; ++k) {
             const double time = static_cast<double>(k) * dt_s;
             const auto state = aircraft.state();
+            ap_nav_state_t nav{};
+            ap_mission_output_t mission_output{};
+            if (mission_mode) {
+                nav = aircraft.navigation_state();
+                if (!ap_mission_step(&mission, &nav, static_cast<float>(l1_period_s),
+                                     config.max_bank_rad, &mission_runtime, &mission_output))
+                    throw std::runtime_error("Mission guidance rejected navigation, configuration, or infeasible turn geometry");
+                if (mission_output.completed) { mission_completed = true; break; }
+            }
             auto requested = trim;
             if (mode == "manual" && time >= pulse_start_s && time < pulse_end_s) {
                 requested.aileron += static_cast<float>(pulse);
@@ -249,7 +348,7 @@ int main(int argc, char** argv)
             if (time >= 2.0 && time < 7.0) {
                 requested.throttle += static_cast<float>(throttle_pulse);
             }
-            const float bank_command = altitude_hold ?
+            const float bank_command = mission_mode ? mission_output.bank_command_rad : altitude_hold ?
                 (time >= 40.0 && time < 60.0 ?
                  static_cast<float>(turn_bank_deg * sim::radians_per_degree) : 0.0f) :
                 speed_hold ? initial_bank : time < 2.0 ? initial_bank :
@@ -258,15 +357,17 @@ int main(int argc, char** argv)
                 initial_pitch + static_cast<float>(pitch_deg * sim::radians_per_degree);
             const float speed_command = time < 2.0 || time >= 30.0 ? initial_speed :
                 initial_speed + static_cast<float>(speed_step_m_s);
-            const float altitude_command = time < 2.0 || time >= 30.0 ? initial_altitude :
+            const float altitude_command = mission_mode ? mission_output.altitude_command_m :
+                time < 2.0 || time >= 30.0 ? initial_altitude :
                 initial_altitude + static_cast<float>(altitude_step_m);
             const ap_input_t input{state, requested, static_cast<float>(dt_s),
-                                  altitude_hold ? AP_MODE_ALTITUDE_AIRSPEED_HOLD :
+                                  altitude_active ? AP_MODE_ALTITUDE_AIRSPEED_HOLD :
                                   (speed_hold ? AP_MODE_ATTITUDE_AIRSPEED_HOLD :
                                   (attitude_hold ? AP_MODE_ATTITUDE_HOLD :
                                   (roll_hold ? AP_MODE_ROLL_HOLD :
                                   (pitch_hold ? AP_MODE_PITCH_HOLD : AP_MODE_MANUAL)))),
-                                  bank_command, pitch_command, altitude_hold ? initial_speed : speed_command,
+                                  bank_command, pitch_command, mission_mode ? mission_output.airspeed_command_m_s :
+                                  (altitude_hold ? initial_speed : speed_command),
                                   altitude_command};
             ap_output_t result{};
             const bool accepted = speed_active ? ap_step_with_runtime(&config, &input, &runtime, &result) :
@@ -295,7 +396,7 @@ int main(int argc, char** argv)
                 << ',' << aircraft.upstream_elevator_command()
                 << ',' << aircraft.pitch_trim_command() << ',';
             if (pitch_active) {
-                csv << (altitude_hold ? result.pitch_command_rad : pitch_command)
+                csv << (altitude_active ? result.pitch_command_rad : pitch_command)
                     << ',' << result.pitch_command_rad << ','
                     << (result.pitch_command_rad - state.pitch_rad);
             } else {
@@ -306,7 +407,8 @@ int main(int argc, char** argv)
                 << ',' << (pitch_active ? config.pitch_rate_gain : 0.0f)
                 << ',' << (pitch_active ? config.max_elevator : 1.0f) << ',';
             if (speed_active) {
-                csv << (altitude_hold ? initial_speed : speed_command)
+                csv << (mission_mode ? mission_output.airspeed_command_m_s :
+                        (altitude_hold ? initial_speed : speed_command))
                     << ',' << result.airspeed_command_m_s << ','
                     << result.airspeed_error_m_s;
             } else {
@@ -319,16 +421,29 @@ int main(int argc, char** argv)
                 << ',' << (speed_active ? config.min_throttle : 0.0f)
                 << ',' << (speed_active ? config.max_throttle : 1.0f)
                 << ',' << state.climb_rate_m_s << ',';
-            if (altitude_hold) {
+            if (altitude_active) {
                 csv << altitude_command << ',' << result.altitude_command_m << ','
                     << result.altitude_error_m;
             } else {
                 csv << ",,";
             }
             csv << ',' << result.altitude_pitch_limited
-                << ',' << (altitude_hold ? config.altitude_gain : 0.0f)
-                << ',' << (altitude_hold ? config.climb_rate_gain : 0.0f)
-                << ',' << (altitude_hold ? config.max_pitch_offset_rad : 0.0f) << '\n';
+                << ',' << (altitude_active ? config.altitude_gain : 0.0f)
+                << ',' << (altitude_active ? config.climb_rate_gain : 0.0f)
+                << ',' << (altitude_active ? config.max_pitch_offset_rad : 0.0f) << ',';
+            if (mission_mode) {
+                csv << nav.lat_e7 * 1e-7 << ',' << nav.lon_e7 * 1e-7 << ','
+                    << mission_output.north_m << ',' << mission_output.east_m << ',' << nav.ground_north_m_s
+                    << ',' << nav.ground_east_m_s << ',' << mission_output.cross_track_m
+                    << ',' << mission_output.leg_index;
+            } else {
+                csv << ",,,,,,,";
+            }
+            csv << ',' << steady_wind.first << ',' << steady_wind.second << ',';
+            if (mission_mode) csv << static_cast<int>(mission_output.phase) << ',' << mission_output.target_distance_m
+                                  << ',' << static_cast<int>(mission_output.waypoint_type);
+            else csv << ",,";
+            csv << '\n';
             aircraft.step(controls);
             if (flightgear) {
                 const auto target = wall_start + std::chrono::duration_cast<std::chrono::steady_clock::duration>(
@@ -337,9 +452,11 @@ int main(int argc, char** argv)
             }
         }
         csv.close();
-        std::cout << "Simulated " << aircraft.time_s() << " s. CSV: "
+        std::cout << "Simulated " << aircraft.time_s() << " s."
+                  << (mission_completed ? " Mission complete." :
+                      (mission_mode ? " Mission incomplete (duration reached)." : "")) << " CSV: "
                   << std::filesystem::absolute(output).string() << '\n';
-        return 0;
+        return mission_mode && !mission_completed ? 2 : 0;
     } catch (const std::exception& error) {
         std::cerr << "autopilot_sim: " << error.what() << '\n';
         return 1;

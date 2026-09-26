@@ -14,13 +14,24 @@ constexpr double meters_per_foot = 0.3048;
 }
 
 JsbsimAdapter::JsbsimAdapter(const std::string& data_root, double dt_s,
-                             const std::string& flightgear_output_file, double airspeed_kts)
+                             const std::string& flightgear_output_file, double airspeed_kts,
+                             double wind_north_m_s, double wind_east_m_s,
+                             const InitialPosition& start)
 {
     if (!std::isfinite(dt_s) || dt_s <= 0.0) {
         throw std::invalid_argument("Simulation timestep must be finite and positive");
     }
+    if (!std::isfinite(start.latitude_deg) || std::abs(start.latitude_deg) > 90.0 ||
+        !std::isfinite(start.longitude_deg) || std::abs(start.longitude_deg) > 180.0 ||
+        !std::isfinite(start.heading_deg) || start.heading_deg < 0.0 || start.heading_deg >= 360.0) {
+        throw std::invalid_argument("Invalid initial latitude, longitude, or heading [0,360)");
+    }
     if (!std::isfinite(airspeed_kts) || airspeed_kts < 80.0 || airspeed_kts > 120.0) {
         throw std::invalid_argument("Initial calibrated airspeed must be in [80, 120] kt");
+    }
+    if (!std::isfinite(wind_north_m_s) || !std::isfinite(wind_east_m_s) ||
+        std::hypot(wind_north_m_s, wind_east_m_s) > 20.0) {
+        throw std::invalid_argument("Steady wind magnitude must be at most 20 m/s");
     }
     const auto root = std::filesystem::absolute(data_root);
     if (!std::filesystem::is_regular_file(root / "aircraft/c172x/c172x.xml")) {
@@ -63,15 +74,20 @@ JsbsimAdapter::JsbsimAdapter(const std::string& data_root, double dt_s,
     fdm_->SetPropertyValue("ic/h-sl-ft", 3000.0);
     fdm_->SetPropertyValue("ic/terrain-elevation-ft", 0.0);
     fdm_->SetPropertyValue("ic/vc-kts", airspeed_kts);
-    fdm_->SetPropertyValue("ic/lat-geod-deg", 30.0);
-    fdm_->SetPropertyValue("ic/long-gc-deg", 0.0);
-    fdm_->SetPropertyValue("ic/psi-true-deg", 0.0);
+    fdm_->SetPropertyValue("ic/lat-geod-deg", start.latitude_deg);
+    fdm_->SetPropertyValue("ic/long-gc-deg", start.longitude_deg);
+    fdm_->SetPropertyValue("ic/psi-true-deg", start.heading_deg);
     fdm_->SetPropertyValue("ic/gamma-deg", 0.0);
     if (!fdm_->RunIC()) {
         throw std::runtime_error("JSBSim initial conditions failed");
     }
     fdm_->SetPropertyValue("propulsion/set-running", -1.0);
     fdm_->DoTrim(JSBSim::tFull); // Throws on failure; never continue untrimmed.
+
+    // Apply a steady N/E wind after trimming. It enters as a step at t=0;
+    // zero wind preserves the original trimmed initial condition exactly.
+    fdm_->SetPropertyValue("atmosphere/wind-north-fps", wind_north_m_s / meters_per_foot);
+    fdm_->SetPropertyValue("atmosphere/wind-east-fps", wind_east_m_s / meters_per_foot);
 
     trim_.aileron = static_cast<float>(fdm_->GetPropertyValue("fcs/aileron-cmd-norm"));
     trim_.elevator = static_cast<float>(fdm_->GetPropertyValue("fcs/elevator-cmd-norm"));
@@ -94,6 +110,31 @@ ap_state_t JsbsimAdapter::state() const
         static_cast<float>(fdm_->GetPropertyValue("position/h-sl-ft") * meters_per_foot),
         static_cast<float>(fdm_->GetPropertyValue("velocities/h-dot-fps") * meters_per_foot)
     };
+}
+
+ap_nav_state_t JsbsimAdapter::navigation_state() const
+{
+    const double lat = fdm_->GetPropertyValue("position/lat-geod-deg");
+    const double lon = fdm_->GetPropertyValue("position/long-gc-deg");
+    const bool valid = std::isfinite(lat) && std::isfinite(lon) &&
+                       lat >= -90.0 && lat <= 90.0 &&
+                       lon >= -180.0 && lon <= 180.0;
+    ap_nav_state_t nav{
+        valid ? static_cast<int32_t>(std::llround(lat * 1e7)) : 0,
+        valid ? static_cast<int32_t>(std::llround(lon * 1e7)) : 0,
+        static_cast<float>(fdm_->GetPropertyValue("velocities/v-north-fps") * meters_per_foot),
+        static_cast<float>(fdm_->GetPropertyValue("velocities/v-east-fps") * meters_per_foot),
+        valid
+    };
+    nav.valid = nav.valid && std::isfinite(nav.ground_north_m_s) &&
+                std::isfinite(nav.ground_east_m_s);
+    return nav;
+}
+
+std::pair<double, double> JsbsimAdapter::steady_wind_m_s() const
+{
+    return {fdm_->GetPropertyValue("atmosphere/wind-north-fps") * meters_per_foot,
+            fdm_->GetPropertyValue("atmosphere/wind-east-fps") * meters_per_foot};
 }
 
 ap_controls_t JsbsimAdapter::trim_controls() const { return trim_; }
