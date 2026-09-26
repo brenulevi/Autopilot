@@ -12,7 +12,9 @@ function(autopilot_warnings target)
     endif()
 endfunction()
 
+add_subdirectory(common)
 add_subdirectory(autopilot)
+add_subdirectory(flight_io)
 
 if(AUTOPILOT_BUILD_SIM)
     enable_language(CXX)
