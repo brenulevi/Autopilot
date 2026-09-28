@@ -1,0 +1,63 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Aircraft config: generate APCF",
+            "type": "cppvsdbg",
+            "request": "launch",
+            "program": "${workspaceFolder}/build/host/bin/Debug/autopilot_config.exe",
+            "args": [
+                "create",
+                "configs/c172x_custom.apcf",
+                "roll_angle_gain=4",
+                "roll_rate_gain=0.5",
+                "max_aileron=1"
+            ],
+            "cwd": "${workspaceFolder}",
+            "stopAtEntry": false,
+            "console": "integratedTerminal"
+        },
+        {
+            "name": "JSBSim: teste de roll hold",
+            "type": "cppvsdbg",
+            "request": "launch",
+            "program": "${workspaceFolder}/build/host/bin/Debug/autopilot_sim.exe",
+            "args": [
+                "--mode", "roll-hold",
+                "--duration", "20",
+                "--airspeed-kts", "60",
+                "--bank-deg", "15",
+                "--output", "logs/roll_right_15deg_60kts.csv"
+            ],
+            "cwd": "${workspaceFolder}",
+            "stopAtEntry": false,
+            "console": "integratedTerminal"
+        },
+        {
+            "name": "Python: arquivo atual",
+            "type": "debugpy",
+            "request": "launch",
+            "python": "${workspaceFolder}/.venv/Scripts/python.exe",
+            "program": "${file}",
+            "args": [],
+            "cwd": "${workspaceFolder}",
+            "console": "integratedTerminal",
+            "justMyCode": true
+        },
+        {
+            "name": "Python: plotar teste de roll hold",
+            "type": "debugpy",
+            "request": "launch",
+            "python": "${workspaceFolder}/.venv/Scripts/python.exe",
+            "program": "${workspaceFolder}/tools/plot_logs.py",
+            "args": [
+                "--roll-hold",
+                "--experiment", "logs/roll_right_15deg_60kts.csv",
+                "--output", "logs/plots/roll_right_15deg_60kts"
+            ],
+            "cwd": "${workspaceFolder}",
+            "console": "integratedTerminal",
+            "justMyCode": true
+        }
+    ]
+}
