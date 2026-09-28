@@ -1,6 +1,6 @@
 {
-  "version": 5,
-  "cmakeMinimumRequired": { "major": 3, "minor": 24, "patch": 0 },
+  "version": 3,
+  "cmakeMinimumRequired": { "major": 3, "minor": 22, "patch": 0 },
   "configurePresets": [
     {
       "name": "host",
@@ -14,7 +14,7 @@
     },
     {
       "name": "core",
-      "displayName": "C library only (no JSBSim download or C++ compiler)",
+      "displayName": "C library only (no JSBSim or C++ compiler)",
       "binaryDir": "${sourceDir}/build/core",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Debug",
