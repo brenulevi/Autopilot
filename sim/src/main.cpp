@@ -78,7 +78,7 @@ int main(int argc, char** argv)
                              "                     [--wind-north-m-s VALUE] [--wind-east-m-s VALUE]\n"
                              "                     [--start-lat-deg VALUE] [--start-lon-deg VALUE] [--start-heading-deg VALUE]\n"
                              "                     [--bank-deg DEGREES] [--pitch-deg DEGREES]\n"
-                             "                     [--airspeed-kts KNOTS] (80 to 120)\n"
+                             "                     [--airspeed-kts KNOTS] (positive; JSBSim trim must succeed)\n"
                              "                     [--roll-kp GAIN] [--roll-kd GAIN]\n"
                              "                     [--pitch-kp GAIN] [--pitch-kd GAIN] [--flightgear]\n"
                              "                     [--speed-step-m-s VALUE] [--speed-kp GAIN] [--speed-ki GAIN]\n"
@@ -246,8 +246,8 @@ int main(int argc, char** argv)
             config.pitch_rate_gain < 0.0f) {
             throw std::invalid_argument("Pitch input must be within +/-90 deg; finite Kp > 0 and Kd >= 0 required");
         }
-        if (airspeed_kts < 80.0 || airspeed_kts > 120.0) {
-            throw std::invalid_argument("Initial calibrated airspeed must be in [80, 120] kt");
+        if (!std::isfinite(airspeed_kts) || airspeed_kts <= 0.0) {
+            throw std::invalid_argument("Initial calibrated airspeed must be finite and positive");
         }
         if (std::abs(speed_step_m_s) > 5.0 || !std::isfinite(config.airspeed_kp) ||
             config.airspeed_kp < 0.0f || !std::isfinite(config.airspeed_ki) ||

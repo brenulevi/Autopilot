@@ -305,8 +305,11 @@ From 2–10 s the default commands are +5 degrees bank and trimmed pitch +2
 degrees; after 10 s they return to wings level and trimmed pitch. Both axes
 retain their individual command and actuator limits. `--bank-deg`,
 `--pitch-deg`, and both gain pairs can be overridden in this mode. The optional
-`--airspeed-kts` sets initial calibrated airspeed from 80 to 120 kt; the model
-is trimmed at that speed before the experiment. It does not hold speed later.
+`--airspeed-kts` accepts any finite positive initial calibrated airspeed in knots.
+The model must trim successfully at that speed before the experiment; otherwise
+the runner reports JSBSim's trim failure and stops. Accepting a speed does not
+establish aircraft capability or controller performance at that speed. This
+option does not hold speed later.
 
 At initial speeds of 90, 100, and 110 kt, the +5/+2-degree simulation had
 maximum bank error below 0.3 degree and pitch error below 0.5 degree during
