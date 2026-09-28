@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.24)
+cmake_minimum_required(VERSION 3.22)
 project(Autopilot VERSION 0.1.0 LANGUAGES C)
 
 option(AUTOPILOT_BUILD_SIM "Build the native JSBSim adapter and runner" ON)

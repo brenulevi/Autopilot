@@ -46,7 +46,8 @@ autopilot/                 C library; no JSBSim, OS, heap, or board dependencies
 sim/                      C++ JSBSim adapter and command-line runner
 missions/                 Editable JSON mission examples
 tools/compile_mission.py  Host-side JSON-to-APM2/APM3 compiler
-cmake/JSBSim.cmake         Pinned dependency and optional local source override
+cmake/JSBSim.cmake         Submodule integration and optional local source override
+third_party/jsbsim/        Pinned JSBSim Git submodule and aircraft data
 tests/                    C API checks and a real C172X integration check
 ```
 
@@ -79,23 +80,28 @@ control. It uses simulator position and ground velocity, not an estimator yet.
 
 ## Build
 
-Requirements: CMake 3.24+, a native C11/C++17 compiler, and internet access on the
-first simulation configuration. On Windows, Visual Studio with the **Desktop
+Requirements: CMake 3.22+, Git, a native C11/C++17 compiler, and internet access to
+initialize the JSBSim submodule. On Windows, Visual Studio with the **Desktop
 development with C++** workload works; CMake can detect it without `cl` on PATH.
 The STM32 ARM cross-compiler alone cannot build this Windows simulation executable.
 
 Run from the project root:
 
 ```powershell
+git submodule update --init --recursive
 cmake --preset host
 cmake --build --preset host --parallel
 ctest --preset host
 ```
 
-The first configure downloads JSBSim v1.3.1 at commit
-`3b25f25e49b42d0489c04ac805674fc1450ca579`, verified with SHA-256. Subsequent builds
-reuse it. Python, documentation, and other optional upstream tools are disabled.
-No global JSBSim installation is required.
+JSBSim v1.3.1 is a Git submodule in `third_party/jsbsim`, pinned to commit
+`3b25f25e49b42d0489c04ac805674fc1450ca579`. New clones can use
+`git clone --recurse-submodules https://github.com/brenulevi/autopilot.git`.
+Run `git submodule update --init --recursive` after pulling changes to the
+submodule revision. CMake uses the local checkout without downloading anything.
+Python, documentation, and other optional upstream tools are disabled.
+No global JSBSim installation is required. The `core` preset does not require
+initializing the submodule.
 
 For an existing/offline JSBSim source checkout, including its data folders:
 
