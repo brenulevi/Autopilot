@@ -46,7 +46,7 @@ class ConfigFileTest(unittest.TestCase):
 
     def test_wire_format_and_edit(self):
         # Independent schema oracle; not a C encode/decode roundtrip.
-        fields = [4, .5, math.radians(20), .5, 10, 3, math.radians(10), .5,
+        fields = [4, .5, math.radians(20), 1, 10, 3, math.radians(10), .5,
                   .08, .005, 0, 1, .015, .05, math.radians(3), 4]
         expected = struct.pack("<4sHHI16f", b"APCF", 1, 64, 0, *fields)
         expected += struct.pack("<I", zlib.crc32(expected))
