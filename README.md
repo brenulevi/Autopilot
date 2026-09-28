@@ -195,7 +195,10 @@ parameters live in `sim/include/sim/c172x_config.hpp`, outside the generic C lib
 | Kp | 4.0 | Normalized aileron command per radian of bank error |
 | Kd | 0.5 | Normalized aileron command per radian/second of body roll rate |
 | Bank command limit | +/-20 degrees | Limit on the requested reference |
-| Aileron limit | +/-0.5 | Limit on the total command, including trim |
+| Aileron limit | +/-1.0 | Limit on the total command, including trim |
+
+These are the built-in defaults. The previously saved `configs/c172x.apcf`
+retains its +/-0.5 aileron limit; loading it with `--config` uses that saved limit.
 
 The command limit is not a demonstrated flight envelope. Checks so far cover only
 small +/-5-degree commands at the configured C172X cruise condition, with exact

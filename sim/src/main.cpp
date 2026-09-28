@@ -103,7 +103,7 @@ int main(int argc, char** argv)
                              "Mission entry captures the nearest route leg; earlier waypoints may be skipped.\n"
                              "Start defaults to 30 N, 0 E, heading 0 deg; heading range [0,360).\n"
                              "Wind components are positive toward north/east; total steady wind <=20 m/s.\n"
-                             "Default bank limit is +/-20 degrees; default aileron limit is +/-0.5.\n"
+                             "Default bank limit is +/-20 degrees; default aileron limit is +/-1.0.\n"
                              "--config loads a validated binary APCF profile; explicit gain/L1 options override it.\n"
                              "Gains use radians, not degrees. Existing CSV files are overwritten.\n"
                              "--flightgear sends native FDM to localhost UDP 5600 at 50 Hz\n"

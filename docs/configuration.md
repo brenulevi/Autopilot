@@ -9,8 +9,10 @@ parser and no text stored in the parameter payload.
 
 Build with `cmake --build --preset host --parallel`. The host build produces
 `build/host/bin/Debug/autopilot_config.exe` alongside `autopilot_sim.exe`.
-The repository includes `configs/c172x.apcf`, containing the existing C172X
-simulation defaults, sequence 0. It is not a Skyward profile.
+The repository includes `configs/c172x.apcf`, containing the original C172X
+simulation profile, sequence 0, with `max_aileron=0.5`. The current compiled
+defaults use `max_aileron=1.0`; `create` uses those compiled defaults, while
+loading an existing file preserves its saved values. Neither is a Skyward profile.
 
 ```powershell
 # Inspect the supplied binary record.
