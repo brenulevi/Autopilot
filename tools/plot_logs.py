@@ -213,7 +213,8 @@ def draw_roll_hold(data, title, output, band_deg):
                            hspace=0.42, wspace=0.28)
     figure.suptitle(title, x=0.09, y=0.96, ha="left", fontsize=19, fontweight="bold")
     figure.text(0.09, 0.91,
-                f"C172X at 100 kt CAS · Kp = {metrics['roll_kp']:.2f}, Kd = {metrics['roll_kd']:.2f} (radian inputs)",
+                f"C172X · Initial TAS = {data['airspeed_m_s'][0]:.1f} m/s · "
+                f"Kp = {metrics['roll_kp']:.2f}, Kd = {metrics['roll_kd']:.2f} (radian inputs)",
                 fontsize=11, color="#465467")
     actual_line, = axes[0, 0].plot(time, roll, color="#1767b3", linewidth=2, label="Measured bank")
     target_line, = axes[0, 0].step(time, command, where="post", color="#a65516",
@@ -270,7 +271,8 @@ def draw_pitch_hold(data, title, output):
                            hspace=0.4, wspace=0.28)
     figure.suptitle(title, x=0.09, y=0.97, ha="left", fontsize=19, fontweight="bold")
     figure.text(0.09, 0.925,
-                f"C172X at 100 kt CAS · Kp = {data['pitch_kp'][0]:.2f}, Kd = {data['pitch_kd'][0]:.2f} (radian inputs)",
+                f"C172X · Initial TAS = {data['airspeed_m_s'][0]:.1f} m/s · "
+                f"Kp = {data['pitch_kp'][0]:.2f}, Kd = {data['pitch_kd'][0]:.2f} (radian inputs)",
                 fontsize=11, color="#465467")
     target = [math.degrees(x) for x in data["pitch_command_rad"]]
     actual = [math.degrees(x) for x in data["pitch_rad"]]
