@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="UTF-8"/><meta name="viewport" content="width=device-width, initial-scale=1.0"/><meta name="theme-color" content="#f6f7f4"/><title>Autopilot · Mission planner</title></head>
+<body>
+  <header class="topbar">
+    <div class="brand"><span class="brand-icon">↗</span><div>AUTOPILOT <span class="brand-divider">/</span> <span class="brand-sub">Mission planner</span></div></div>
+    <div class="top-actions"><button id="import">Import JSON</button><button id="save">Save JSON</button><button id="export" class="primary">Download APM <span>↗</span></button></div>
+    <input id="file" type="file" accept=".json,application/json" hidden/>
+  </header>
+  <main>
+    <aside class="sidebar">
+      <div class="sidebar-heading"><span class="eyebrow">FLIGHT PLAN</span><span class="badge">APM3</span><h1>Build your route.</h1><p>Place waypoints. Shape the turns.<br/>See the flight before it happens.</p></div>
+      <div class="section-heading"><h2>Waypoints <span id="count">0 / 32</span></h2><button id="example" class="text-button">Load example</button></div>
+      <div class="waypoint-list" id="waypoints"></div>
+      <p class="hint">Click the map to add a waypoint. Drag a marker to move it.</p>
+      <section class="editor" id="waypoint-editor"></section>
+      <details open class="settings"><summary>Aircraft & preview <span>↙</span></summary>
+        <div class="field-grid">
+          <label>Max bank · °<input id="bank" type="number" min="1" max="60" step="1" value="20"/></label>
+          <label>L1 period · s<input id="l1" type="number" min="1" max="30" step="0.5" value="4"/></label>
+          <label>Start course · °<input id="course" type="number" min="0" max="359.999" step="1" value="0"/></label>
+          <label>Ground speed · m/s<input id="speed" type="number" min="5" max="150" step="0.1" value="56.2"/></label>
+        </div>
+        <p class="hint">Drag the S marker or choose “Set start” on the map. Course is relative to true north.</p>
+        <button id="reset-start" class="wide">Start at first waypoint</button>
+      </details>
+      <div class="sidebar-footer"><span class="dot green"></span> Local mission workspace <button id="new" class="text-button">New plan</button></div>
+    </aside>
+    <section class="map-panel" aria-label="Mission map">
+      <div id="map"></div>
+      <div class="map-tools"><div class="mode-group"><button id="mode-add" class="active">＋ Add waypoint</button><button id="mode-pan">Pan</button><button id="mode-start">Set start</button></div><button id="fit">⤢ Fit route</button></div>
+      <div class="map-key"><span><i class="key-line planned"></i> Planned route</span><span><i class="key-line entry"></i> Entry capture</span><span><i class="key-line flown"></i> Flown track</span></div>
+      <div class="preview-card"><div class="preview-title"><span class="dot green" id="preview-dot"></span><strong id="preview-label">Planning route…</strong><span class="small-pill">GEOMETRY</span></div><div class="preview-stats"><div><span>ROUTE LENGTH</span><strong id="length">—</strong></div><div><span>TURN RADIUS</span><strong id="radius">—</strong></div><div><span>ENTRY LEG</span><strong id="entry-leg">—</strong></div></div><p id="preview-message">Calculating with the autopilot planner.</p><p class="fine-print">Horizontal geometry; fly-over assumes ideal arrival. Wind and aircraft response affect the flown path.</p></div>
+      <div id="notice" role="status" hidden></div>
+    </section>
+    <section class="telemetry-bar" aria-label="Live telemetry">
+      <div class="connection"><span class="dot" id="connection-dot"></span><div><strong id="connection">Connecting…</strong><small id="session">Waiting for telemetry</small></div></div>
+      <div class="flight-stat"><small>ALTITUDE · MSL</small><strong id="t-alt">— <em>m</em></strong></div>
+      <div class="flight-stat"><small>AIRSPEED · TAS</small><strong id="t-speed">— <em>m/s</em></strong></div>
+      <div class="flight-stat"><small>CROSS-TRACK</small><strong id="t-cross">— <em>m</em></strong></div>
+      <div class="flight-stat"><small>FLIGHT TIME</small><strong id="t-time">— <em>s</em></strong></div>
+      <label class="follow"><input type="checkbox" id="follow"/> Follow aircraft</label><button id="clear-track">Clear track</button>
+    </section>
+  </main>
+  <script type="module" src="/main.ts"></script>
+</body>
+</html>
