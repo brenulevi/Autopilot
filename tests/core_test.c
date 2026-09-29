@@ -12,6 +12,10 @@ int main(void)
 {
     ap_input_t input = {0};
     ap_output_t output = {0};
+    ap_runtime_t runtime = {0};
+    /* Keep repetitive stateless checks readable while exercising the unified API. */
+#define ap_step(config_value, input_value, output_value) \
+    ap_step(config_value, input_value, &runtime, output_value)
     ap_config_t config = {2.0f, 0.3f, 0.35f, 0.5f, 3.0f, 0.5f, 0.2f, 0.5f};
     input.dt_s = 0.01f;
     input.requested = (ap_controls_t){2.0f, -2.0f, 0.25f, 1.2f};
@@ -144,5 +148,6 @@ int main(void)
     config.pitch_angle_gain = 3.0f;
     input.mode = (ap_mode_t)99;
     CHECK(!ap_step(&config, &input, &output));
+#undef ap_step
     return 0;
 }

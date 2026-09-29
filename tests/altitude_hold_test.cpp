@@ -39,7 +39,7 @@ void run_case(const char* root, double step_m, double turn_bank_deg)
                                bank_command, initial.pitch_rad, initial.airspeed_m_s,
                                altitude_command};
         ap_output_t output{};
-        check(ap_step_with_runtime(&config, &input, &runtime, &output),
+        check(ap_step(&config, &input, &runtime, &output),
               "Altitude hold rejected simulation state");
         check(output.controls.rudder == trim.rudder, "Altitude hold changed rudder");
         check(std::abs(output.altitude_error_m - (altitude_command - state.altitude_m)) < 1e-4f,

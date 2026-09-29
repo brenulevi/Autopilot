@@ -1,3 +1,4 @@
+#include "flight_common/crc32.h"
 #include "autopilot/mission.h"
 
 #include <math.h>
@@ -17,16 +18,6 @@ static void put_u32(uint8_t *p, uint32_t value)
     p[2] = (uint8_t)(value >> 16); p[3] = (uint8_t)(value >> 24);
 }
 
-static uint32_t crc32(const uint8_t *data, size_t length)
-{
-    uint32_t crc = 0xFFFFFFFFu;
-    for (size_t i = 0; i < length; ++i) {
-        crc ^= data[i];
-        for (unsigned bit = 0; bit < 8; ++bit)
-            crc = (crc >> 1) ^ ((crc & 1u) ? 0xEDB88320u : 0u);
-    }
-    return ~crc;
-}
 
 static void set_nav_position(ap_nav_state_t *nav, float north_m, float east_m)
 {
@@ -49,7 +40,7 @@ int main(void)
         put_u32(p + 8, 91440u);
         put_u16(p + 12, 5620u);
     }
-    put_u32(bytes + 60, crc32(bytes, 60));
+    put_u32(bytes + 60, flight_crc32(bytes, 60));
     ap_mission_t mission = {0};
     CHECK(ap_mission_decode(bytes, sizeof bytes, &mission));
     CHECK(mission.count == 3 && mission.origin_lat_e7 == 300000000);
@@ -68,14 +59,14 @@ int main(void)
 
     /* APM3 uses the last waypoint word for the type; APM2 still reserves it. */
     bytes[3] = '3'; put_u16(bytes+4,3); put_u16(bytes+42,1);
-    put_u32(bytes+60,crc32(bytes,60));
+    put_u32(bytes+60,flight_crc32(bytes,60));
     CHECK(ap_mission_decode(bytes,sizeof(bytes),&mission));
     CHECK(mission.waypoints[1].type==AP_WAYPOINT_FLY_OVER);
-    put_u16(bytes+42,2); put_u32(bytes+60,crc32(bytes,60));
+    put_u16(bytes+42,2); put_u32(bytes+60,flight_crc32(bytes,60));
     CHECK(!ap_mission_decode(bytes,sizeof(bytes),&mission));
-    bytes[3]='2'; put_u16(bytes+4,2); put_u16(bytes+42,1); put_u32(bytes+60,crc32(bytes,60));
+    bytes[3]='2'; put_u16(bytes+4,2); put_u16(bytes+42,1); put_u32(bytes+60,flight_crc32(bytes,60));
     CHECK(!ap_mission_decode(bytes,sizeof(bytes),&mission));
-    put_u16(bytes+42,0); put_u32(bytes+60,crc32(bytes,60));
+    put_u16(bytes+42,0); put_u32(bytes+60,flight_crc32(bytes,60));
     CHECK(ap_mission_decode(bytes,sizeof(bytes),&mission));
 
     ap_nav_state_t nav = {0, 0, 56.0f, 0.0f, true};

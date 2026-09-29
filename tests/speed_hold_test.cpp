@@ -29,7 +29,7 @@ void run_case(const char* root, double initial_kts, double step_m_s)
         const ap_input_t input{state, trim, 0.01f, AP_MODE_ATTITUDE_AIRSPEED_HOLD,
                                initial.roll_rad, initial.pitch_rad, command};
         ap_output_t output{};
-        check(ap_step_with_runtime(&config, &input, &runtime, &output),
+        check(ap_step(&config, &input, &runtime, &output),
               "Airspeed hold rejected simulation state");
         check(!output.throttle_saturated, "Small speed step saturated throttle");
         check(output.controls.throttle >= 0.0f && output.controls.throttle <= 1.0f,
