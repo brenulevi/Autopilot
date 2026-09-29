@@ -26,8 +26,8 @@ JsbsimAdapter::JsbsimAdapter(const std::string& data_root, double dt_s,
         !std::isfinite(start.heading_deg) || start.heading_deg < 0.0 || start.heading_deg >= 360.0) {
         throw std::invalid_argument("Invalid initial latitude, longitude, or heading [0,360)");
     }
-    if (!std::isfinite(airspeed_kts) || airspeed_kts < 80.0 || airspeed_kts > 120.0) {
-        throw std::invalid_argument("Initial calibrated airspeed must be in [80, 120] kt");
+    if (!std::isfinite(airspeed_kts) || airspeed_kts <= 0.0) {
+        throw std::invalid_argument("Initial calibrated airspeed must be finite and positive");
     }
     if (!std::isfinite(wind_north_m_s) || !std::isfinite(wind_east_m_s) ||
         std::hypot(wind_north_m_s, wind_east_m_s) > 20.0) {

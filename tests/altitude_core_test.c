@@ -25,42 +25,42 @@ int main(void)
     ap_runtime_t runtime = {0};
     ap_output_t output = {0};
 
-    CHECK(!ap_step(&config, &input, &output));
-    CHECK(ap_step_with_runtime(&config, &input, &runtime, &output));
+    CHECK(!ap_step(&config, &input, NULL, &output));
+    CHECK(ap_step(&config, &input, &runtime, &output));
     CHECK(fabsf(output.pitch_command_rad - 0.04f) < 1e-6f);
     CHECK(output.altitude_error_m == 2.0f);
     CHECK(!output.altitude_pitch_limited);
     CHECK(output.controls.elevator < 0.0f);
 
     input.state.climb_rate_m_s = 0.4f;
-    CHECK(ap_step_with_runtime(&config, &input, &runtime, &output));
+    CHECK(ap_step(&config, &input, &runtime, &output));
     CHECK(fabsf(output.pitch_command_rad - 0.02f) < 1e-6f);
 
     input.state.climb_rate_m_s = 0.0f;
     input.altitude_command_m = 120.0f;
-    CHECK(ap_step_with_runtime(&config, &input, &runtime, &output));
+    CHECK(ap_step(&config, &input, &runtime, &output));
     CHECK(fabsf(output.pitch_command_rad - 0.07f) < 1e-6f);
     CHECK(output.altitude_pitch_limited);
 
     input.altitude_command_m = 80.0f;
-    CHECK(ap_step_with_runtime(&config, &input, &runtime, &output));
+    CHECK(ap_step(&config, &input, &runtime, &output));
     CHECK(fabsf(output.pitch_command_rad + 0.05f) < 1e-6f);
     CHECK(output.altitude_pitch_limited);
 
     const ap_output_t previous = output;
     const float previous_integral = runtime.airspeed_integral_norm;
     config.altitude_gain = NAN;
-    CHECK(!ap_step_with_runtime(&config, &input, &runtime, &output));
+    CHECK(!ap_step(&config, &input, &runtime, &output));
     CHECK(output.pitch_command_rad == previous.pitch_command_rad);
     CHECK(runtime.airspeed_integral_norm == previous_integral);
     config.altitude_gain = 0.015f;
     input.state.climb_rate_m_s = NAN;
-    CHECK(!ap_step_with_runtime(&config, &input, &runtime, &output));
+    CHECK(!ap_step(&config, &input, &runtime, &output));
     CHECK(output.pitch_command_rad == previous.pitch_command_rad);
     CHECK(runtime.airspeed_integral_norm == previous_integral);
     input.state.climb_rate_m_s = 0.0f;
     input.altitude_command_m = NAN;
-    CHECK(!ap_step_with_runtime(&config, &input, &runtime, &output));
+    CHECK(!ap_step(&config, &input, &runtime, &output));
     CHECK(output.pitch_command_rad == previous.pitch_command_rad);
     CHECK(runtime.airspeed_integral_norm == previous_integral);
     return 0;

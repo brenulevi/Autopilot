@@ -33,16 +33,17 @@ autopilot/                 C library; no JSBSim, OS, heap, or board dependencies
   include/autopilot/mission.h    Compiled-mission decoder and L1 guidance API
   include/autopilot/control/actuators.h  Normalized actuator-command type
   include/autopilot/estimation/state.h   State interface for simulator/estimator
-  src/autopilot.c         Input validation and mode dispatch
+  src/autopilot/step.c    Input validation and mode dispatch
+  src/config/config.c     APCF configuration codec
   src/control/manual.c    Bounds manual commands and untouched control axes
   src/control/roll.c      Bank-error and body-roll-rate feedback
   src/control/pitch.c     Pitch-error and body-pitch-rate feedback
   src/control/airspeed.c  Throttle PI with conditional anti-windup
-  src/guidance/bank.c     Limits the requested bank angle
-  src/guidance/pitch.c    Limits the requested pitch angle
+  src/guidance/bank_limit.c  Limits the requested bank angle
+  src/guidance/pitch_limit.c Limits the requested pitch angle
   src/guidance/altitude.c Produces a pitch request from altitude and climb rate
-  src/mission.c           APM2/APM3 decoder, capture, turns, and L1 guidance
-  src/path.c              Planar Dubins path geometry
+  src/mission/mission.c   APM2/APM3 decoder, capture, turns, and L1 guidance
+  src/mission/path.c      Planar Dubins path geometry
 sim/                      C++ JSBSim adapter and command-line runner
 missions/                 Editable JSON mission examples
 tools/compile_mission.py  Host-side JSON-to-APM2/APM3 compiler
@@ -51,6 +52,12 @@ third_party/jsbsim/        Pinned JSBSim Git submodule and aircraft data
 tests/                    C API checks and a real C172X integration check
 ```
 
+The runtime direction is `mission → guidance → control`: mission chooses the
+route target, guidance turns navigation or altitude error into attitude
+references, and control turns attitude error into actuator commands.
+`src/autopilot/step.c` is the composition boundary that validates the sample and
+invokes those layers; it does not own mission navigation state.
+
 `autopilot/` and `flight_io/` share `flight_controls_t` through `common/`;
 `ap_controls_t` remains a compatibility alias. Neither library depends on the
 other. Flight I/O provides iBUS decoding, configurable RC calibration, explicit
@@ -58,6 +65,8 @@ pilot/autopilot selection with stale-command fallback and re-engagement latching
 and actuator mixing into pulse-width demands. STM32 UART/timer drivers and the
 MCU-to-MCU wire protocol remain firmware work. See the
 [Flight I/O guide](flight_io/README.md) for its API, policy, and F405/H723 boundary.
+See [the autopilot architecture](docs/architecture.md) for the runtime flow and
+the responsibility of each layer.
 
 Both firmware applications can use the shared **FLG1 binary flight logger**, with
 source/session IDs, local timestamps, sequence numbers, CRCs, and a copying
@@ -69,8 +78,8 @@ Each simulation tick reads JSBSim state, calls the C autopilot, applies the
 returned commands through the adapter, and advances the aircraft by 0.01 seconds.
 The loop normally runs as fast as the computer allows. `--flightgear` sends
 aircraft state over localhost UDP and paces the simulation in real time.
-`ap_step()` handles stateless modes; `ap_step_with_runtime()` handles modes with
-throttle PI state. The control and guidance
+`ap_step()` is the single control entry point; it receives caller-owned runtime
+state for the throttle PI when a speed or altitude mode uses it. The control and guidance
 modules have private headers and can evolve without changing callers. The
 `estimation/state.h` file defines the state passed into control; it does not
 implement an estimator yet. JSBSim currently fills that structure with exact
@@ -116,6 +125,29 @@ cmake --preset core
 cmake --build --preset core --parallel
 ctest --preset core
 ```
+
+### VS Code launches (Linux)
+
+`.vscode/launch.json` provides roll and pitch simulation launches, plus a Python
+plot launch for each. Select a configuration in **Run and Debug** and press **F5**.
+Edit its `args` array to change the angle, gains, duration, or output path. The
+pitch angle is an offset from trim. Simulation launches configure and build
+`autopilot_sim` automatically through `.vscode/tasks.json`.
+
+Use the Microsoft C/C++ extension and GDB for simulation debugging, and the
+Python and Python Debugger extensions for plots. Choose a Python interpreter
+with `tools/requirements-plot.txt` installed using **Python: Select Interpreter**.
+Run the corresponding simulation before its plot configuration. CSV logs go to
+`logs/`, and PNG/SVG plots go to `logs/plots/`. If you change a simulation's CSV
+output path, also update `--experiment` in its plot configuration.
+
+The file also includes `FlightGear (visualização)` and the compounds `Roll +
+FlightGear` / `Pitch + FlightGear`. Select one of the compounds in **Run and
+Debug** to start FlightGear and the C++ simulation together. The Linux
+executable is configured as `/usr/games/fgfs`; change the `program` field if
+FlightGear is installed elsewhere. On Windows, replace it with the full path
+to `fgfs.exe` and adjust `MIMode` for the installed C++ debugger. FlightGear
+uses `--fdm=null` and receives JSBSim's Native FDM stream on UDP port 5600.
 
 For a future embedded toolchain, use a separate build directory:
 
@@ -229,8 +261,9 @@ After installing the optional plotting dependencies described below:
 ./.venv/Scripts/python.exe tools/plot_logs.py --roll-hold --experiment logs/c172x_roll_hold_negative.csv --output logs/plots/c172x_roll_hold_negative
 ```
 
-This produces PNG/SVG plots of commanded versus measured bank, tracking error,
-body roll rate, and aileron demand. A `.metrics.json` file records each command
+This produces PNG/SVG plots of requested/effective/measured bank, tracking error,
+body roll rate, aileron demand, and changes in true airspeed and altitude.
+A `.metrics.json` file records each command
 step's overshoot, settling time, endpoint error, and saturation counts. The CSV
 also records raw/effective bank commands, gains, limits, and clipping flags.
 Manual-mode logs leave the bank-reference/error columns empty.
@@ -258,6 +291,78 @@ Neither run saturated the aileron. The largest absolute demand was approximately
 below 1.7 s for both transitions in the positive-bank experiment; the negative
 experiment then verified the response in the other direction. These gains are
 specific to this simulated model and operating point, not the Skyward or custom PCB.
+
+### Automated roll and pitch comparisons
+
+In VS Code, select **Varredura + plots: roll** or **Varredura + plots: pitch** and
+press **F5**. Each launch builds the simulator and runs all combinations of
+60, 75, 90, 100, and 110 kt CAS with +5, -5, +10, -10, +15, -15, +30, and -30
+degrees. Edit `--speeds` and `--angles` in `.vscode/launch.json` to change the
+matrix. The Python interpreter needs `tools/requirements-plot.txt` installed.
+
+The same workflow is available from the terminal (Linux):
+
+```bash
+cmake --build --preset host --target autopilot_sim --parallel 4
+python3 tools/sweep_attitude.py --axis roll --speeds 60 75 90 100 110 --angles 5 -5 10 -10 15 -15 30 -30
+python3 tools/sweep_attitude.py --axis pitch --speeds 60 75 90 100 110 --angles 5 -5 10 -10 15 -15 30 -30
+```
+
+Every run creates a timestamped folder under `logs/sweeps/` containing:
+
+- `index.md`: links to each case's individual performance report.
+- `performance_*.png` / `.svg`: time histories for one speed/angle combination,
+  including the selected-axis response, tracking error, bank and pitch together,
+  unwrapped heading change, body rates p/q/r, all control commands, TAS and altitude.
+  The response highlights the 10–90% rise interval, directional peak (P), and
+  settling (S). A table separates step and return metrics; actuator saturation
+  is shaded. No settling marker is drawn when settling was not observed.
+- Raw CSVs and simulator console logs for each case.
+- `compare_ANGLEdeg.png` / `.svg`: six panels overlaying the different speeds
+  for one angle: attitude, effective-command error, angular rate, actuator
+  demand, TAS change, and altitude change. CAS and initial measured TAS are
+  identified separately in the legend.
+- `matrix_step.png` and `matrix_return.png` (also SVG): speed-by-angle comparisons
+  of settling time, overshoot, last-second RMS error, saturation percentage,
+  maximum TAS change, and maximum altitude change.
+- `summary.csv` and `summary.json`: per-phase metrics, including 10–90% rise
+  time, whole-phase RMS error, last-second mean/RMS error, peak angular rate,
+  peak actuator demand, command limiting, and exact simulator commands.
+
+To regenerate plots and metrics from an existing sweep's CSVs without rerunning
+the simulations, use the saved folder's settings:
+
+```bash
+python3 tools/sweep_attitude.py --replot logs/sweeps/roll_YYYYMMDD_HHMMSS_microseconds
+```
+
+This updates that folder's reports in place. Rise and settling durations are
+relative to the start of each phase; `time_10_s`, `time_90_s`, `peak_time_s`, and
+`settling_at_s` in the summary use absolute simulation time. A directional peak
+is the largest excursion toward the step, even when the target is never reached.
+
+Roll angles are absolute bank requests. Pitch angles are offsets from trim;
+their effective targets vary with the trimmed pitch at each speed. The sweep
+uses an explicit absolute attitude limit of 30 degrees for roll and 45 degrees
+for pitch, configurable with `--angle-limit-deg`. Ordinary simulator defaults
+remain 20 and 10 degrees; `--bank-limit-deg` and `--pitch-limit-deg` override
+them. Increasing the test angle beyond the limit intentionally exercises command
+limiting, marked with `*` in the matrices and `[limited]` in curve legends.
+
+Each default run lasts 20 s: the command is applied during [2,10) s, then returns
+to wings level (roll) or trimmed pitch (pitch). Metrics distinguish those two
+phases. Settling uses `--settling-band-deg` (default 0.25 degrees); `NS` / JSON
+`null` means it was not observed before the phase ended. Last-second error is
+an observed-window metric, not a claim of steady state. Errors and overshoot
+refer to the effective target; check the limiting flags when judging whether
+the original request was achieved.
+
+`--kp` and `--kd` set the same gains across the matrix. Other controls remain at
+trim, so speed and altitude are free to change; the last two panels expose that
+coupling. Trim failures, simulator errors, and per-case timeouts are recorded
+as `FAIL` without stopping the remaining cases. The script returns exit code 1
+after exporting the report if any case failed. A completed run is not a tracking
+pass/fail verdict; compare its response metrics.
 
 ## Pitch attitude hold
 
@@ -311,8 +416,11 @@ From 2–10 s the default commands are +5 degrees bank and trimmed pitch +2
 degrees; after 10 s they return to wings level and trimmed pitch. Both axes
 retain their individual command and actuator limits. `--bank-deg`,
 `--pitch-deg`, and both gain pairs can be overridden in this mode. The optional
-`--airspeed-kts` sets initial calibrated airspeed from 80 to 120 kt; the model
-is trimmed at that speed before the experiment. It does not hold speed later.
+`--airspeed-kts` sets initial calibrated airspeed to any finite positive value
+(default 100 kt). The model must successfully trim at that speed before the
+experiment; it does not hold speed later. Roll and pitch plot subtitles show
+the initial true airspeed (TAS) read from the CSV, converted to knots. This can
+differ from the calibrated airspeed (CAS) requested on the command line.
 
 At initial speeds of 90, 100, and 110 kt, the +5/+2-degree simulation had
 maximum bank error below 0.3 degree and pitch error below 0.5 degree during
@@ -352,9 +460,9 @@ integral grows by `Ki × speed_error × dt`. The C172X simulation gains are
 Kp = 0.08 and Ki = 0.005 in normalized-throttle/SI units. Throttle is limited
 to [0, 1]; integration stops when it would push farther into a limit. The
 integrator is stored in caller-owned `ap_runtime_t`, initialized to zero and
-passed to `ap_step_with_runtime()` on every tick. The earlier `ap_step()` modes
-remain stateless. Switching to another mode through `ap_step_with_runtime()`
-clears the speed integrator.
+passed to `ap_step()` on every tick. Roll, pitch, and manual modes clear the
+unused speed integrator. Switching to another mode through `ap_step()` clears
+the speed integrator.
 
 At 100 kt initial calibrated airspeed, ±1 m/s true-speed steps had less than
 0.2 m/s maximum tracking error in the later 20–30 s hold and 50–60 s return
@@ -502,6 +610,10 @@ route corner angle before using these results to tune lookahead and plan turns.
 
 ## Live FlightGear visualization
 
+For a browser-based waypoint editor, APM download, Dubins/turn preview, and live
+flight track, see the [Node.js mission planner](webapp/README.md). Its native
+preview helper shares the autopilot's C geometry; the webapp requires no Python.
+
 FlightGear is a visual display for the same standalone JSBSim C172X simulation;
 the C autopilot still computes the controls. Start FlightGear first in one
 PowerShell window (adjust the executable path if needed):
@@ -568,15 +680,17 @@ executable is not sufficient. Initial conditions and property mappings live in
 
 ## Interface and next steps
 
-`ap_step(config, input, output)` runs the stateless manual and attitude modes.
-`ap_step_with_runtime(config, input, runtime, output)` adds the true-airspeed
-PI and altitude modes; its caller owns and initializes `ap_runtime_t`. Inputs include aircraft
+`ap_step(config, input, runtime, output)` is the single entry point for manual,
+attitude, true-airspeed, and altitude modes. Its caller owns and initializes
+`ap_runtime_t`; the runtime is used only by the throttle PI. Inputs include aircraft
 state, trimmed controls, timestep, explicit mode, and the active setpoints.
 Outputs include bounded actuator commands, effective setpoints, and clipping
 flags. Invalid samples, configuration, modes, and arithmetic overflow return
 `false` without changing output or runtime; the runner terminates. This is an
 interface contract, not a flight failsafe implementation. Mode transitions are
 immediate, with no reference ramp or bumpless-transfer mechanism yet.
+`ap_mission_step()` remains a separate stateful API because leg selection,
+capture, and turn progress have a different lifecycle from the control loop.
 
 Attitude uses radians relative to local North-East-Down; body axes are forward,
 right, down. Altitude is meters above mean sea level, positive up. The adapter
@@ -603,6 +717,7 @@ Plot-metric tests are separate from CMake so Python remains optional:
 
 ```powershell
 ./.venv/Scripts/python.exe tests/test_plot_metrics.py
+./.venv/Scripts/python.exe tests/test_sweep_attitude.py
 ```
 
 They check overshoot direction, settling after leaving and reentering the band,

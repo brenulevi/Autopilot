@@ -11,8 +11,8 @@ Selection happens once on the first call with a zero-initialized
 runtime to resume the same leg; reset it to select again from current position.
 This prevents repeatedly jumping between nearby parallel legs.
 
-`autopilot/src/mission.c` implements selection and guidance;
-`autopilot/src/path.c` implements the entry geometry. This stage runs entirely
+`autopilot/src/mission/mission.c` implements selection and guidance;
+`autopilot/src/mission/path.c` implements the entry geometry. This stage runs entirely
 in JSBSim using simulator truth, with the same C APIs available for later firmware.
 
 ## Why Dubins appears here

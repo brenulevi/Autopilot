@@ -44,6 +44,24 @@ class ConfigFileTest(unittest.TestCase):
                                   "--output", output, *arguments, success=success)
         return output, result
 
+    def test_attitude_limit_overrides(self):
+        for axis, flag, limits in (("roll", "bank", (20, 40)), ("pitch", "pitch", (10, 45))):
+            for limit in limits:
+                with self.subTest(axis=axis, limit=limit):
+                    path = self.work / f"{axis}_{limit}.csv"
+                    self.run_command(SIM, "--mode", f"{axis}-hold", "--duration", "2.1",
+                                     f"--{flag}-deg", "30", f"--{flag}-limit-deg", str(limit),
+                                     "--output", path)
+                    with path.open() as stream:
+                        row = list(csv.DictReader(stream))[-1]
+                    request = float(row[f"{axis}_request_rad"])
+                    effective = float(row[f"{axis}_command_rad"])
+                    self.assertAlmostEqual(effective, min(request, math.radians(limit)), places=6)
+                    self.assertEqual(int(row[f"{'bank' if axis == 'roll' else 'pitch'}_command_limited"]),
+                                     int(request > math.radians(limit)))
+            for invalid in ("0", "90", "nan"):
+                self.run_command(SIM, "--mode", f"{axis}-hold", f"--{flag}-limit-deg", invalid, success=False)
+
     def test_wire_format_and_edit(self):
         # Independent schema oracle; not a C encode/decode roundtrip.
         fields = [4, .5, math.radians(20), .5, 10, 3, math.radians(10), .5,

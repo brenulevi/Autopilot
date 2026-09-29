@@ -1,3 +1,9 @@
+add_executable(crc32_test crc32_test.c)
+target_link_libraries(crc32_test PRIVATE Flight::Common)
+set_target_properties(crc32_test PROPERTIES C_STANDARD 11 C_STANDARD_REQUIRED YES C_EXTENSIONS NO)
+autopilot_warnings(crc32_test)
+add_test(NAME flight_common.crc32 COMMAND crc32_test)
+
 add_executable(log_core_test log_core_test.c)
 target_link_libraries(log_core_test PRIVATE Autopilot::Core Flight::IO)
 set_target_properties(log_core_test PROPERTIES C_STANDARD 11 C_STANDARD_REQUIRED YES C_EXTENSIONS NO)
