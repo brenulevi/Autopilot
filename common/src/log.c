@@ -1,3 +1,4 @@
+#include "flight_common/crc32.h"
 #include "flight_common/log.h"
 #include <float.h>
 #include <limits.h>
@@ -43,16 +44,6 @@ static void put_float(uint8_t *p, float v)
 static float get_float(const uint8_t *p)
 {
     uint32_t bits = get32(p); float v; memcpy(&v, &bits, 4); return v;
-}
-static uint32_t crc32(const uint8_t *p, size_t n)
-{
-    uint32_t crc = UINT32_MAX;
-    for (size_t i = 0; i < n; ++i) {
-        crc ^= p[i];
-        for (unsigned bit = 0; bit < 8; ++bit)
-            crc = (crc >> 1) ^ ((crc & 1u) ? UINT32_C(0xedb88320) : 0u);
-    }
-    return ~crc;
 }
 static size_t payload_size(uint16_t type)
 {
@@ -140,7 +131,7 @@ bool flight_log_encode(const flight_log_record_t *r, uint8_t *bytes,
         put32(p + 16, e->data.clock_pair.uncertainty_us); break;
     default: return false;
     }
-    put32(buffer + total - 4, crc32(buffer, total - 4));
+    put32(buffer + total - 4, flight_crc32(buffer, total - 4));
     memcpy(bytes, buffer, total); *written = total;
     return true;
 }
@@ -153,7 +144,7 @@ bool flight_log_decode(const uint8_t *bytes, size_t length, flight_log_record_t 
     uint16_t type = get16(bytes + 6);
     size_t n = payload_size(type);
     if (!n || get16(bytes + 8) != n || length != FLIGHT_LOG_HEADER_SIZE + n + 4 ||
-        get32(bytes + length - 4) != crc32(bytes, length - 4) ||
+        get32(bytes + length - 4) != flight_crc32(bytes, length - 4) ||
         !source_valid(bytes[5]) || !get32(bytes + 16)) return false;
     flight_log_record_t r = {0};
     r.source = bytes[5]; r.sequence = get32(bytes + 12); r.session_id = get32(bytes + 16);

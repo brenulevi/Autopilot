@@ -18,12 +18,13 @@ int main(int argc, char** argv)
         sim::JsbsimAdapter aircraft(argv[1], 0.01);
         const auto initial = aircraft.state();
         const auto trim = aircraft.trim_controls();
+        ap_runtime_t control_runtime{};
         check(std::abs(initial.altitude_m - 914.4f) < 0.5f, "Altitude unit conversion failed");
         check(initial.airspeed_m_s > 45.0f && initial.airspeed_m_s < 65.0f, "Airspeed outside expected cruise range");
         for (int k = 0; k < 100; ++k) {
             const ap_input_t input{aircraft.state(), trim, 0.01f, AP_MODE_MANUAL, 0.0f};
             ap_output_t result{};
-            check(ap_step(nullptr, &input, &result), "C core rejected trimmed state");
+            check(ap_step(nullptr, &input, &control_runtime, &result), "C core rejected trimmed state");
             aircraft.step(result.controls);
         }
         const auto steady = aircraft.state();
@@ -36,13 +37,13 @@ int main(int argc, char** argv)
         for (int k = 0; k < 50; ++k) {
             const ap_input_t input{aircraft.state(), demand, 0.01f, AP_MODE_MANUAL, 0.0f};
             ap_output_t result{};
-            check(ap_step(nullptr, &input, &result), "C core rejected pulse state");
+            check(ap_step(nullptr, &input, &control_runtime, &result), "C core rejected pulse state");
             aircraft.step(result.controls);
         }
         const auto response = aircraft.state();
         const ap_input_t final_input{response, trim, 0.01f, AP_MODE_MANUAL, 0.0f};
         ap_output_t final_result{};
-        check(ap_step(nullptr, &final_input, &final_result), "Pulse produced non-finite state");
+        check(ap_step(nullptr, &final_input, &control_runtime, &final_result), "Pulse produced non-finite state");
         check(response.roll_rad > steady.roll_rad + 0.001f, "Positive aileron did not produce positive roll");
         check(response.p_rad_s > 0.001f, "Positive aileron did not produce positive roll rate");
         check(std::abs(aircraft.time_s() - 1.5) < 1e-8, "Simulation time did not advance correctly");

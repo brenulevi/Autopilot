@@ -71,29 +71,24 @@ typedef struct {
     bool altitude_pitch_limited;
 } ap_output_t;
 
-/* Stateless entry point: manual, individual axis, or combined attitude hold.
+/* Main control entry point for every mode. The caller owns runtime and keeps it
+ * across successive ticks. Manual, roll, pitch, and attitude modes do not use
+ * persistent state; they clear the airspeed integral. Airspeed and altitude
+ * modes use the same entry point and update the airspeed PI state.
  * aileron = trim + angle_gain * (bank_command - roll) - rate_gain * p.
  * This is PD-like, not a PID: there is no integral state. Body p is not
  * identical to the derivative of Euler bank except near simple attitudes.
  * Pitch assumes negative elevator command produces positive pitch acceleration:
  * elevator = trim - angle_gain * (pitch_command - pitch) + rate_gain * q.
  * Verify that sign on each aircraft before using pitch hold.
- * No integrator or hidden state across mode switches. dt_s is
- * validated for the interface but not used by this algebraic control law.
- * config is required in closed-loop modes and ignored (may be NULL) in manual mode.
- * Airspeed and altitude modes require ap_step_with_runtime instead.
- * No allocation, OS, simulator, or peripheral dependencies.
+ * dt_s is validated for the interface but not used by the algebraic attitude
+ * laws. config is required in closed-loop modes and ignored (may be NULL) in
+ * manual mode. runtime must be zero-initialized before the first call and
+ * remains caller-owned. No allocation, OS, simulator, or peripheral dependencies.
  * Returns false on invalid input and leaves output unchanged. The caller
  * must handle failure; this API does not define an aircraft failsafe. */
-bool ap_step(const ap_config_t *config, const ap_input_t *input, ap_output_t *output);
-
-/* Stateful entry point for attitude + true-airspeed or altitude + airspeed hold.
- * Altitude hold creates a limited pitch command from altitude and climb rate.
- * Uses the same attitude laws, plus throttle PI with conditional anti-windup.
- * On a successful step in another mode, clears the airspeed integrator.
- * On any failure, both output and runtime are unchanged. */
-bool ap_step_with_runtime(const ap_config_t *config, const ap_input_t *input,
-                          ap_runtime_t *runtime, ap_output_t *output);
+bool ap_step(const ap_config_t *config, const ap_input_t *input,
+             ap_runtime_t *runtime, ap_output_t *output);
 
 #ifdef __cplusplus
 }

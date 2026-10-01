@@ -1,18 +1,19 @@
 add_library(autopilot STATIC
-    src/config.c
-    src/autopilot.c
-    src/mission.c
-    src/path.c
+    src/config/config.c
+    src/autopilot/step.c
+    src/mission/mission.c
+    src/mission/path.c
     src/control/manual.c
     src/control/roll.c
     src/control/pitch.c
     src/control/airspeed.c
-    src/guidance/bank.c
-    src/guidance/pitch.c
+    src/guidance/bank_limit.c
+    src/guidance/pitch_limit.c
     src/guidance/altitude.c
 )
 add_library(Autopilot::Core ALIAS autopilot)
 target_include_directories(autopilot PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include")
+target_include_directories(autopilot PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src")
 target_link_libraries(autopilot PUBLIC Flight::Common)
 if(NOT MSVC)
     target_link_libraries(autopilot PUBLIC m)

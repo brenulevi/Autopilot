@@ -208,17 +208,20 @@ def draw_roll_hold(data, title, output, band_deg):
     roll = [math.degrees(value) for value in data["roll_rad"]]
     error = [target - value for target, value in zip(command, roll)]
     metrics = tracking_metrics(data, band_deg)
-    figure, axes = plt.subplots(2, 2, figsize=(12, 8), sharex=True)
+    figure, axes = plt.subplots(3, 2, figsize=(12, 11), sharex=True)
     figure.subplots_adjust(left=0.09, right=0.97, top=0.80, bottom=0.19,
                            hspace=0.42, wspace=0.28)
     figure.suptitle(title, x=0.09, y=0.96, ha="left", fontsize=19, fontweight="bold")
     figure.text(0.09, 0.91,
-                f"C172X · Initial TAS = {data['airspeed_m_s'][0]:.1f} m/s · "
+                f"C172X · Initial TAS {data['airspeed_m_s'][0] * 3600 / 1852:.1f} kt · "
                 f"Kp = {metrics['roll_kp']:.2f}, Kd = {metrics['roll_kd']:.2f} (radian inputs)",
                 fontsize=11, color="#465467")
     actual_line, = axes[0, 0].plot(time, roll, color="#1767b3", linewidth=2, label="Measured bank")
     target_line, = axes[0, 0].step(time, command, where="post", color="#a65516",
                                   linestyle="--", linewidth=1.7, label="Effective bank command")
+    request_line, = axes[0, 0].step(time, [math.degrees(v) for v in data["roll_request_rad"]],
+                                   where="post", color="#777777", linestyle=":",
+                                   linewidth=1.2, label="Requested bank")
     axes[0, 0].set_title("Bank-angle tracking", loc="left", pad=9)
     axes[0, 0].set_ylabel("Bank (deg)")
     axes[0, 1].axhspan(-band_deg, band_deg, color="#dce4ed", linewidth=0)
@@ -234,6 +237,13 @@ def draw_roll_hold(data, title, output, band_deg):
         axes[1, 1].axhline(value, color="#778596", linestyle=":", linewidth=1)
     axes[1, 1].set_title(f"Aileron demand (limits ±{limit:g})", loc="left", pad=9)
     axes[1, 1].set_ylabel("Command (normalized)")
+    axes[2, 0].plot(time, [(v - data["airspeed_m_s"][0]) * 3600 / 1852
+                          for v in data["airspeed_m_s"]], color="#1767b3")
+    axes[2, 0].set_title("True airspeed change from initial", loc="left", pad=9)
+    axes[2, 0].set_ylabel("Δ TAS (kt)")
+    axes[2, 1].plot(time, [v - data["altitude_m"][0] for v in data["altitude_m"]], color="#1767b3")
+    axes[2, 1].set_title("Altitude change from initial", loc="left", pad=9)
+    axes[2, 1].set_ylabel("Δ altitude (m)")
     for axis in axes.flat:
         axis.grid(color="#e1e6eb", linewidth=0.7)
         axis.set_axisbelow(True)
@@ -243,8 +253,8 @@ def draw_roll_hold(data, title, output, band_deg):
             axis.axvline(segment["step_time_s"], color="#c2cbd5", linewidth=0.8, zorder=0)
     for axis in axes[-1, :]:
         axis.set_xlabel("Simulation time (s)")
-    figure.legend(handles=[target_line, actual_line, Patch(facecolor="#dce4ed", label=f"Error band ±{band_deg:g}°")],
-                  loc="upper left", bbox_to_anchor=(0.083, 0.885), ncol=3, frameon=False)
+    figure.legend(handles=[target_line, request_line, actual_line, Patch(facecolor="#dce4ed", label=f"Error band ±{band_deg:g}°")],
+                  loc="upper left", bbox_to_anchor=(0.083, 0.885), ncol=2, frameon=False)
     figure.text(0.09, 0.055,
                 f"Aileron saturation: {metrics['aileron_saturated_samples']} / {metrics['sample_count']} samples. "
                 f"Limited bank commands: {metrics['bank_command_limited_samples']} samples.\n"
@@ -271,13 +281,15 @@ def draw_pitch_hold(data, title, output):
                            hspace=0.4, wspace=0.28)
     figure.suptitle(title, x=0.09, y=0.97, ha="left", fontsize=19, fontweight="bold")
     figure.text(0.09, 0.925,
-                f"C172X · Initial TAS = {data['airspeed_m_s'][0]:.1f} m/s · "
+                f"C172X · Initial TAS {data['airspeed_m_s'][0] * 3600 / 1852:.1f} kt · "
                 f"Kp = {data['pitch_kp'][0]:.2f}, Kd = {data['pitch_kd'][0]:.2f} (radian inputs)",
                 fontsize=11, color="#465467")
     target = [math.degrees(x) for x in data["pitch_command_rad"]]
     actual = [math.degrees(x) for x in data["pitch_rad"]]
     axes[0, 0].step(time, target, where="post", color="#a65516", linestyle="--",
-                    linewidth=1.7, label="Command")
+                    linewidth=1.7, label="Effective command")
+    axes[0, 0].step(time, [math.degrees(v) for v in data["pitch_request_rad"]],
+                    where="post", color="#777777", linestyle=":", label="Request")
     axes[0, 0].plot(time, actual, color="#1767b3", linewidth=2, label="Measured")
     axes[0, 0].legend(frameon=False)
     panels = [

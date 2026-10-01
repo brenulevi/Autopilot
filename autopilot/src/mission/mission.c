@@ -1,3 +1,4 @@
+#include "flight_common/crc32.h"
 #include "autopilot/mission.h"
 
 #include <math.h>
@@ -19,16 +20,6 @@ static int32_t read_i32(const uint8_t *p)
     return (int32_t)((int64_t)bits - 4294967296LL);
 }
 
-static uint32_t crc32(const uint8_t *data, size_t length)
-{
-    uint32_t crc = 0xFFFFFFFFu;
-    for (size_t i = 0; i < length; ++i) {
-        crc ^= data[i];
-        for (unsigned bit = 0; bit < 8; ++bit)
-            crc = (crc >> 1) ^ ((crc & 1u) ? 0xEDB88320u : 0u);
-    }
-    return ~crc;
-}
 
 static bool valid_lat_lon(int32_t lat_e7, int32_t lon_e7)
 {
@@ -99,7 +90,7 @@ bool ap_mission_decode(const uint8_t *data, size_t length, ap_mission_t *mission
     const uint16_t count = read_u16(data + 6);
     if (count < 2 || count > AP_MISSION_MAX_WAYPOINTS ||
         length != 16u + 16u * (size_t)count || read_u32(data + 8) != 0 ||
-        crc32(data, length - 4) != read_u32(data + length - 4)) return false;
+        flight_crc32(data, length - 4) != read_u32(data + length - 4)) return false;
 
     ap_mission_t next = {0};
     next.count = count;
@@ -185,9 +176,12 @@ static bool nearest_leg(const ap_mission_t *mission, const ap_nav_state_t *nav,
 
 /* A tangent fillet uses d = R*tan(change_of_course/2) on both legs. Reserving
  * at most 45% per corner leaves a straight section between neighboring turns. */
-static bool fly_by_path(const ap_mission_t *mission, uint16_t leg, float radius,
+bool ap_mission_leg_path(const ap_mission_t *mission, uint16_t leg, float radius,
                         ap_dubins_path_t *path)
 {
+    if (!mission || !path || mission->count < 2 ||
+        mission->count > AP_MISSION_MAX_WAYPOINTS || leg >= mission->count - 1 ||
+        !isfinite(radius) || radius < 1) return false;
     const ap_waypoint_t *a = &mission->waypoints[leg], *b = a + 1;
     const float length = hypotf(b->north_m-a->north_m, b->east_m-a->east_m);
     if (!isfinite(length) || length < 1) return false;
@@ -217,6 +211,25 @@ static bool fly_by_path(const ap_mission_t *mission, uint16_t leg, float radius,
     *path = result; return true;
 }
 
+bool ap_mission_fly_over_path(const ap_mission_t *mission, uint16_t leg,
+                               float radius_m, float lookahead_m,
+                               float north_m, float east_m, float course_rad,
+                               ap_dubins_path_t *path)
+{
+    if (!mission || !path || mission->count < 3 ||
+        mission->count > AP_MISSION_MAX_WAYPOINTS || leg >= mission->count - 2 ||
+        !isfinite(lookahead_m) || lookahead_m <= 0) return false;
+    ap_dubins_path_t outgoing;
+    if (!ap_mission_leg_path(mission, leg + 1, radius_m, &outgoing)) return false;
+    const ap_waypoint_t *b = &mission->waypoints[leg + 1];
+    const float straight = outgoing.segments[0].length_m;
+    const float goal = fminf(2 * radius_m, straight - fminf(lookahead_m, 0.25f * straight));
+    const float course = outgoing.segments[0].course_rad;
+    return ap_dubins_plan(north_m, east_m, course_rad,
+                         b->north_m + goal * cosf(course), b->east_m + goal * sinf(course),
+                         course, radius_m, path);
+}
+
 static bool plan_entry(const ap_mission_t *mission, const ap_nav_state_t *nav,
                        float north, float east, float speed, float lookahead,
                        float bank_limit, ap_mission_runtime_t *runtime)
@@ -228,7 +241,7 @@ static bool plan_entry(const ap_mission_t *mission, const ap_nav_state_t *nav,
     const float cross=un*(east-a->east_m)-ue*(north-a->north_m);
     const float alignment=(nav->ground_north_m_s*un+nav->ground_east_m_s*ue)/speed;
     ap_dubins_path_t route;
-    if (!fly_by_path(mission,runtime->leg_index,runtime->turn_radius_m,&route)) return false;
+    if (!ap_mission_leg_path(mission,runtime->leg_index,runtime->turn_radius_m,&route)) return false;
     const float straight = route.segments[0].length_m;
     const float corridor=fmaxf(20.0f,fminf(0.5f*lookahead,100.0f));
     if (fabsf(cross)<=corridor && along>=0 && along<=straight && alignment>=0.8660254f) return true;
@@ -338,7 +351,7 @@ bool ap_mission_step(const ap_mission_t *mission, const ap_nav_state_t *nav,
         if (!isfinite(next.turn_radius_m) || next.turn_radius_m<1) return false;
         for (uint16_t i=next.leg_index;i<mission->count-1;++i) {
             ap_dubins_path_t check;
-            if (!fly_by_path(mission,i,next.turn_radius_m,&check)) return false;
+            if (!ap_mission_leg_path(mission,i,next.turn_radius_m,&check)) return false;
         }
     }
     if (!isfinite(next.turn_radius_m) || next.turn_radius_m<1) return false;
@@ -414,18 +427,14 @@ bool ap_mission_step(const ap_mission_t *mission, const ap_nav_state_t *nav,
             return true;
         }
         if (!last && !next.turn_prepared && b->type==AP_WAYPOINT_FLY_BY) {
-            if (!fly_by_path(mission,next.leg_index,next.turn_radius_m,&next.turn_path)) return false;
+            if (!ap_mission_leg_path(mission,next.leg_index,next.turn_radius_m,&next.turn_path)) return false;
             next.turn_prepared=true; next.turn_active=true; next.turn_segment=0; next.turn_progress_m=0;
         }
         if (!last && !next.turn_active && b->type==AP_WAYPOINT_FLY_OVER && passed) {
-            ap_dubins_path_t outgoing;
-            if (!fly_by_path(mission,next.leg_index+1,next.turn_radius_m,&outgoing)) return false;
-            const float straight=outgoing.segments[0].length_m;
-            const float goal=fminf(2*next.turn_radius_m,straight-fminf(lookahead,0.25f*straight));
-            const float course=outgoing.segments[0].course_rad;
-            if (!ap_dubins_plan(north_m,east_m,atan2f(nav->ground_east_m_s,nav->ground_north_m_s),
-                                b->north_m+goal*cosf(course),b->east_m+goal*sinf(course),course,
-                                next.turn_radius_m,&next.turn_path)) return false;
+            if (!ap_mission_fly_over_path(mission, next.leg_index, next.turn_radius_m,
+                                          lookahead, north_m, east_m,
+                                          atan2f(nav->ground_east_m_s,nav->ground_north_m_s),
+                                          &next.turn_path)) return false;
             next.turn_prepared=true; next.turn_active=true; next.turn_segment=0; next.turn_progress_m=0;
             next.turn_direction=0;
         }

@@ -117,7 +117,7 @@ Input and output must not overlap.
 `sim::load_config()` and `sim::save_config()` are PC filesystem adapters around
 those C functions. Firmware must supply its own EEPROM driver and load/save
 policy. At boot, read the record, decode into a candidate, and install accepted
-settings into RAM. Pass `.control` to `ap_step_with_runtime()` and `.l1_period_s`
+settings into RAM. Pass `.control` and a zero-initialized `ap_runtime_t` to `ap_step()` and `.l1_period_s`
 to `ap_mission_step()`. Do not access EEPROM on each control tick.
 
 Future firmware must also define what happens when neither stored record is

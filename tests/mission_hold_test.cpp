@@ -51,7 +51,7 @@ void run_case(const char* data_root, double wind_east_m_s)
                                guidance.bank_command_rad, initial.pitch_rad,
                                guidance.airspeed_command_m_s, guidance.altitude_command_m};
         ap_output_t output{};
-        check(ap_step_with_runtime(&config, &input, &control_runtime, &output),
+        check(ap_step(&config, &input, &control_runtime, &output),
               "Control rejected mission command");
         largest_bank = std::max(largest_bank, std::abs(static_cast<double>(guidance.bank_command_rad)));
         if (time >= 50.0) {

@@ -127,10 +127,10 @@ int main(int argc, char **argv)
 
     /* Real API calls from both libraries feed the same sink/codec. Firmware owns
      * these calls; neither algorithm performs hidden writes. */
-    ap_input_t input = {0}; ap_output_t ap_output = {0};
+    ap_input_t input = {0}; ap_output_t ap_output = {0}; ap_runtime_t ap_runtime = {0};
     input.mode = AP_MODE_MANUAL; input.dt_s = .01f; input.state.airspeed_m_s = 20;
     input.requested = (ap_controls_t){.25f, -.5f, 0, .75f};
-    CHECK(ap_step(NULL, &input, &ap_output));
+    CHECK(ap_step(NULL, &input, &ap_runtime, &ap_output));
     flight_log_entry_t controls = {0}; controls.type = FLIGHT_LOG_CONTROLS;
     controls.data.controls.values = ap_output.controls;
     controls.data.controls.stage = FLIGHT_LOG_COMPUTED; controls.data.controls.valid = true;

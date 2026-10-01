@@ -1,4 +1,4 @@
-add_library(flight_common STATIC src/log.c)
+add_library(flight_common STATIC src/log.c src/crc32.c)
 add_library(Flight::Common ALIAS flight_common)
 target_include_directories(flight_common PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include")
 set_target_properties(flight_common PROPERTIES C_STANDARD 11 C_STANDARD_REQUIRED YES C_EXTENSIONS NO)
