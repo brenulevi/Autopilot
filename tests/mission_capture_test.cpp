@@ -68,7 +68,7 @@ void run(const char* root, const std::filesystem::path& directory, const Case& t
                          guidance.bank_command_rad, initial.pitch_rad,
                          guidance.airspeed_command_m_s, guidance.altitude_command_m};
         ap_output_t output{};
-        check(ap_step_with_runtime(&config, &input, &control, &output), "Controller rejected capture command");
+        check(ap_step(&config, &input, &control, &output), "Controller rejected capture command");
         check(std::abs(guidance.bank_command_rad) <= config.max_bank_rad, "Capture command exceeded bank limit");
         max_altitude = std::max(max_altitude, std::abs(static_cast<double>(state.altitude_m - initial.altitude_m)));
         max_speed = std::max(max_speed, std::abs(static_cast<double>(state.airspeed_m_s - initial.airspeed_m_s)));

@@ -97,6 +97,17 @@ bool ap_mission_decode(const uint8_t *data, size_t length, ap_mission_t *mission
 bool ap_mission_project(const ap_mission_t *mission, int32_t lat_e7,
                         int32_t lon_e7, float *north_m, float *east_m);
 
+/* Geometry shared by runtime guidance and host route previews. Requires a
+ * prepared mission. A leg includes its inbound straight and optional fly-by arc.
+ * Fly-over starts at the supplied passage position/course and joins leg+1.
+ * These functions preserve output on failure. */
+bool ap_mission_leg_path(const ap_mission_t *mission, uint16_t leg,
+                          float radius_m, ap_dubins_path_t *path);
+bool ap_mission_fly_over_path(const ap_mission_t *mission, uint16_t leg,
+                               float radius_m, float lookahead_m,
+                               float north_m, float east_m, float course_rad,
+                               ap_dubins_path_t *path);
+
 /* Dubins entry, fly-by fillets, and fly-over passage for an aircraft already flying.
  * Zero-initialize runtime on engagement: select the nearest finite route segment,
  * allowing earlier waypoints to be skipped. Equal-distance ties prefer the leg

@@ -38,7 +38,7 @@ flight_logger_t logger;
 bool ready = flight_log_init(&logger, FLIGHT_LOG_H723, boot_session_id,
                              board_log_enqueue, &board_queue);
 
-/* After a successful ap_step() or ap_step_with_runtime(): */
+/* After a successful ap_step(): */
 flight_log_entry_t entry = {0};
 entry.type = FLIGHT_LOG_CONTROLS;
 entry.data.controls.values = ap_result.controls;

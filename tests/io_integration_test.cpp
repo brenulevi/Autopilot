@@ -28,6 +28,7 @@ int main(int argc, char** argv)
         const auto config = sim::c172x_config;
         const fio_supervisor_config_t io_config{100, 50, {0,0,0,0}, trim};
         fio_supervisor_runtime_t runtime{};
+        ap_runtime_t control_runtime{};
         flight_control_sample_t ap{};
         bool observed_timeout = false, observed_reengagement = false;
         for (uint32_t tick = 0; tick < 600; ++tick) {
@@ -41,7 +42,7 @@ int main(int argc, char** argv)
             ap_output_t result{};
             // One estimator failure while MANUAL is requested.
             if (tick == 100) input.state.roll_rad = std::numeric_limits<float>::quiet_NaN();
-            bool accepted = ap_step(&config, &input, &result);
+            bool accepted = ap_step(&config, &input, &control_runtime, &result);
             check(accepted == (tick != 100), "Unexpected autopilot validation result");
             // Simulate a stalled H723 link during [3,4) seconds: no timestamp refresh.
             if (tick < 300 || tick >= 400)

@@ -1,3 +1,4 @@
+#include "flight_common/crc32.h"
 #include "autopilot/config.h"
 
 #include <float.h>
@@ -20,16 +21,6 @@ static void write_u32(uint8_t *p, uint32_t value)
     for (unsigned i = 0; i < 4; ++i) p[i] = (uint8_t)(value >> (8 * i));
 }
 
-static uint32_t crc32(const uint8_t *bytes, size_t length)
-{
-    uint32_t crc = UINT32_MAX;
-    for (size_t i = 0; i < length; ++i) {
-        crc ^= bytes[i];
-        for (unsigned bit = 0; bit < 8; ++bit)
-            crc = (crc >> 1) ^ ((crc & 1u) ? 0xEDB88320u : 0u);
-    }
-    return ~crc;
-}
 
 /* Explicit order is the wire schema; never walk struct memory as an array. */
 static void to_fields(const ap_aircraft_config_t *record, float fields[16])
@@ -89,7 +80,7 @@ bool ap_config_encode(const ap_aircraft_config_t *config, uint8_t *bytes, size_t
         memcpy(&bits, &fields[i], sizeof(bits));
         write_u32(encoded + 12 + 4 * i, bits);
     }
-    write_u32(encoded + 76, crc32(encoded, 76));
+    write_u32(encoded + 76, flight_crc32(encoded, 76));
     memcpy(bytes, encoded, sizeof(encoded));
     return true;
 }
@@ -98,7 +89,7 @@ bool ap_config_decode(const uint8_t *bytes, size_t length, ap_aircraft_config_t 
 {
     if (bytes == NULL || config == NULL || length != AP_CONFIG_RECORD_SIZE ||
         memcmp(bytes, "APCF", 4) != 0 || bytes[4] != 1 || bytes[5] != 0 ||
-        bytes[6] != 64 || bytes[7] != 0 || read_u32(bytes + 76) != crc32(bytes, 76))
+        bytes[6] != 64 || bytes[7] != 0 || read_u32(bytes + 76) != flight_crc32(bytes, 76))
         return false;
     float f[16];
     for (unsigned i = 0; i < 16; ++i) {

@@ -22,6 +22,7 @@ void run_case(const char* root, double speed_kts, double bank_deg, double pitch_
     double max_pitch_hold_error_deg = 0.0;
     double max_bank_return_error_deg = 0.0;
     double max_pitch_return_error_deg = 0.0;
+    ap_runtime_t runtime{};
     for (int k = 0; k < 2000; ++k) {
         const double time = k * 0.01;
         const auto state = aircraft.state();
@@ -32,7 +33,7 @@ void run_case(const char* root, double speed_kts, double bank_deg, double pitch_
         const ap_input_t input{state, trim, 0.01f, AP_MODE_ATTITUDE_HOLD,
                                bank_command, pitch_command};
         ap_output_t output{};
-        check(ap_step(&config, &input, &output), "Combined hold rejected simulation state");
+        check(ap_step(&config, &input, &runtime, &output), "Combined hold rejected simulation state");
         check(!output.aileron_saturated && !output.elevator_saturated,
               "Small combined command saturated an actuator");
         check(!output.bank_command_limited && !output.pitch_command_limited,

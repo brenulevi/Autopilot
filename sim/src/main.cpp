@@ -67,6 +67,8 @@ int main(int argc, char** argv)
         bool elevator_pulse_set = false;
         bool throttle_pulse_set = false;
         bool flightgear = false;
+        bool realtime = false;
+        bool telemetry_stdout = false;
         for (int i = 1; i < argc; ++i) {
             const std::string option = argv[i];
             if (option == "--help") {
@@ -78,13 +80,16 @@ int main(int argc, char** argv)
                              "                     [--wind-north-m-s VALUE] [--wind-east-m-s VALUE]\n"
                              "                     [--start-lat-deg VALUE] [--start-lon-deg VALUE] [--start-heading-deg VALUE]\n"
                              "                     [--bank-deg DEGREES] [--pitch-deg DEGREES]\n"
-                             "                     [--airspeed-kts KNOTS] (positive; JSBSim trim must succeed)\n"
+                             "                     [--bank-limit-deg DEGREES] (0 < limit < 90; default 20)\n"
+                             "                     [--pitch-limit-deg DEGREES] (absolute attitude; 0 < limit < 90; default 10)\n"
+                             "                     [--airspeed-kts KNOTS] (positive; default 100)\n"
                              "                     [--roll-kp GAIN] [--roll-kd GAIN]\n"
                              "                     [--pitch-kp GAIN] [--pitch-kd GAIN] [--flightgear]\n"
+                             "                     [--realtime] [--telemetry-stdout]\n"
                              "                     [--speed-step-m-s VALUE] [--speed-kp GAIN] [--speed-ki GAIN]\n"
                              "                     [--altitude-step-m VALUE] [--turn-bank-deg VALUE]\n"
                              "                     [--altitude-kh GAIN] [--altitude-kv GAIN]\n"
-                             "C172X, 100 Hz, 3000 ft MSL, 100 kt calibrated airspeed.\n"
+                             "C172X, 100 Hz, 3000 ft MSL; default 100 kt calibrated airspeed.\n"
                              "Manual (default): pulse +0.05 during [2, 2.5) s, duration 10 s.\n"
                              "Use --aileron-pulse 0 for a trim-only baseline.\n"
                              "Use --elevator-pulse for a manual elevator pulse instead.\n"
@@ -107,13 +112,16 @@ int main(int argc, char** argv)
                              "--config loads a validated binary APCF profile; explicit gain/L1 options override it.\n"
                              "Gains use radians, not degrees. Existing CSV files are overwritten.\n"
                              "--flightgear sends native FDM to localhost UDP 5600 at 50 Hz\n"
-                             "and paces the simulation in real time. Start FlightGear first.\n";
+                             "and paces the simulation in real time. Start FlightGear first.\n"
+                             "--realtime paces without FlightGear; --telemetry-stdout emits JSON at 10 Hz.\n";
                 return 0;
             }
             if (option == "--flightgear") {
                 flightgear = true;
                 continue;
             }
+            if (option == "--realtime") { realtime = true; continue; }
+            if (option == "--telemetry-stdout") { telemetry_stdout = true; continue; }
             if (i + 1 >= argc) {
                 throw std::invalid_argument("Missing value for " + option);
             }
@@ -154,7 +162,23 @@ int main(int argc, char** argv)
             }
             else if (option == "--mode") mode = value;
             else if (option == "--bank-deg") { bank_deg = number(value); roll_options_set = true; }
+            else if (option == "--bank-limit-deg") {
+                const double limit = number(value);
+                if (limit <= 0.0 || limit >= 90.0)
+                    throw std::invalid_argument("Bank limit must be strictly between 0 and 90 degrees");
+                config_overrides.emplace_back(&ap_config_t::max_bank_rad,
+                                               static_cast<float>(limit * sim::radians_per_degree));
+                roll_options_set = true;
+            }
             else if (option == "--pitch-deg") { pitch_deg = number(value); pitch_options_set = true; }
+            else if (option == "--pitch-limit-deg") {
+                const double limit = number(value);
+                if (limit <= 0.0 || limit >= 90.0)
+                    throw std::invalid_argument("Pitch limit must be strictly between 0 and 90 degrees");
+                config_overrides.emplace_back(&ap_config_t::max_pitch_rad,
+                                               static_cast<float>(limit * sim::radians_per_degree));
+                pitch_options_set = true;
+            }
             else if (option == "--roll-kp") {
                 config_overrides.emplace_back(&ap_config_t::roll_angle_gain, static_cast<float>(number(value))); roll_options_set = true;
             }
@@ -246,7 +270,7 @@ int main(int argc, char** argv)
             config.pitch_rate_gain < 0.0f) {
             throw std::invalid_argument("Pitch input must be within +/-90 deg; finite Kp > 0 and Kd >= 0 required");
         }
-        if (!std::isfinite(airspeed_kts) || airspeed_kts <= 0.0) {
+        if (airspeed_kts <= 0.0) {
             throw std::invalid_argument("Initial calibrated airspeed must be finite and positive");
         }
         if (std::abs(speed_step_m_s) > 5.0 || !std::isfinite(config.airspeed_kp) ||
@@ -370,8 +394,7 @@ int main(int argc, char** argv)
                                   (altitude_hold ? initial_speed : speed_command),
                                   altitude_command};
             ap_output_t result{};
-            const bool accepted = speed_active ? ap_step_with_runtime(&config, &input, &runtime, &result) :
-                ap_step(&config, &input, &result);
+            const bool accepted = ap_step(&config, &input, &runtime, &result);
             if (!accepted) {
                 throw std::runtime_error("C autopilot rejected invalid state, command, configuration, or timestep");
             }
@@ -444,8 +467,26 @@ int main(int argc, char** argv)
                                   << ',' << static_cast<int>(mission_output.waypoint_type);
             else csv << ",,";
             csv << '\n';
+            if (telemetry_stdout && k % 10 == 0) {
+                const auto telemetry_nav = mission_mode ? nav : aircraft.navigation_state();
+                if (telemetry_nav.valid) {
+                    const double heading = std::fmod(state.yaw_rad * 180.0 / 3.141592653589793 + 360.0, 360.0);
+                    std::cout << std::setprecision(10)
+                        << "{\"time_s\":" << time
+                        << ",\"lat_deg\":" << telemetry_nav.lat_e7 * 1e-7
+                        << ",\"lon_deg\":" << telemetry_nav.lon_e7 * 1e-7
+                        << ",\"altitude_m\":" << state.altitude_m
+                        << ",\"heading_deg\":" << heading
+                        << ",\"airspeed_m_s\":" << state.airspeed_m_s
+                        << ",\"ground_speed_m_s\":" << std::hypot(telemetry_nav.ground_north_m_s, telemetry_nav.ground_east_m_s);
+                    if (mission_mode) std::cout << ",\"mission_leg\":" << mission_output.leg_index
+                        << ",\"cross_track_m\":" << mission_output.cross_track_m
+                        << ",\"phase\":\"" << static_cast<int>(mission_output.phase) << "\"";
+                    std::cout << "}\n" << std::flush;
+                }
+            }
             aircraft.step(controls);
-            if (flightgear) {
+            if (flightgear || realtime) {
                 const auto target = wall_start + std::chrono::duration_cast<std::chrono::steady_clock::duration>(
                     std::chrono::duration<double>(static_cast<double>(k + 1) * dt_s));
                 std::this_thread::sleep_until(target);

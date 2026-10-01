@@ -23,6 +23,7 @@ void run_direction(const char* root, double bank_deg)
     double max_return_error_deg = 0.0;
     double max_overshoot_deg = 0.0;
     double max_aileron = 0.0;
+    ap_runtime_t runtime{};
     for (int k = 0; k < 2000; ++k) {
         const double time = k * 0.01;
         const auto state = aircraft.state();
@@ -30,7 +31,7 @@ void run_direction(const char* root, double bank_deg)
             (time < 10.0 ? static_cast<float>(target) : 0.0f);
         const ap_input_t input{state, trim, 0.01f, AP_MODE_ROLL_HOLD, command};
         ap_output_t result{};
-        check(ap_step(&config, &input, &result), "Roll hold rejected simulation state");
+        check(ap_step(&config, &input, &runtime, &result), "Roll hold rejected simulation state");
         check(!result.aileron_saturated, "Small bank command saturated the aileron");
         check(!result.bank_command_limited, "Small bank command hit the bank limit");
         check(result.controls.elevator == trim.elevator && result.controls.rudder == trim.rudder &&

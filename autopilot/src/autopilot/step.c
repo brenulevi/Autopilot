@@ -3,8 +3,8 @@
 #include "control/roll.h"
 #include "control/pitch.h"
 #include "control/airspeed.h"
-#include "guidance/bank.h"
-#include "guidance/pitch.h"
+#include "guidance/bank_limit.h"
+#include "guidance/pitch_limit.h"
 #include "guidance/altitude.h"
 
 #include <math.h>
@@ -22,7 +22,8 @@ static bool valid_sample(const ap_input_t *input)
            isfinite(input->requested.rudder) && isfinite(input->requested.throttle);
 }
 
-bool ap_step(const ap_config_t *config, const ap_input_t *input, ap_output_t *output)
+static bool ap_step_attitude(const ap_config_t *config, const ap_input_t *input,
+                             ap_output_t *output)
 {
     if (input == NULL || output == NULL || !valid_sample(input)) return false;
 
@@ -60,16 +61,19 @@ bool ap_step(const ap_config_t *config, const ap_input_t *input, ap_output_t *ou
     return true;
 }
 
-bool ap_step_with_runtime(const ap_config_t *config, const ap_input_t *input,
-                          ap_runtime_t *runtime, ap_output_t *output)
+bool ap_step(const ap_config_t *config, const ap_input_t *input,
+             ap_runtime_t *runtime, ap_output_t *output)
 {
     if (input == NULL || runtime == NULL || output == NULL) return false;
+    ap_output_t result;
+    ap_runtime_t next_runtime = *runtime;
+
     if (input->mode != AP_MODE_ATTITUDE_AIRSPEED_HOLD &&
         input->mode != AP_MODE_ALTITUDE_AIRSPEED_HOLD) {
-        ap_output_t result;
-        if (!ap_step(config, input, &result)) return false;
+        if (!ap_step_attitude(config, input, &result)) return false;
+        next_runtime.airspeed_integral_norm = 0.0f;
         *output = result;
-        runtime->airspeed_integral_norm = 0.0f;
+        *runtime = next_runtime;
         return true;
     }
 
@@ -79,9 +83,7 @@ bool ap_step_with_runtime(const ap_config_t *config, const ap_input_t *input,
     if (input->mode == AP_MODE_ALTITUDE_AIRSPEED_HOLD &&
         !ap_guidance_altitude(config, input, &attitude_input.pitch_command_rad,
                               &altitude_pitch_limited)) return false;
-    ap_output_t result;
-    ap_runtime_t next_runtime = *runtime;
-    if (!ap_step(config, &attitude_input, &result) ||
+    if (!ap_step_attitude(config, &attitude_input, &result) ||
         !ap_airspeed_compute(config, input, &next_runtime, &result)) return false;
 
     if (input->mode == AP_MODE_ALTITUDE_AIRSPEED_HOLD) {
