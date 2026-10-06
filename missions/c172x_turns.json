@@ -1,9 +1,0 @@
-{
-  "version": 3,
-  "waypoints": [
-    {"lat_deg": 30.0, "lon_deg": 0.0, "altitude_m": 914.4, "airspeed_m_s": 56.2, "type": "fly_by"},
-    {"lat_deg": 30.0449661, "lon_deg": 0.0, "altitude_m": 914.4, "airspeed_m_s": 56.2, "type": "fly_by"},
-    {"lat_deg": 30.0449661, "lon_deg": 0.0519207, "altitude_m": 914.4, "airspeed_m_s": 56.2, "type": "fly_over"},
-    {"lat_deg": 30.0899322, "lon_deg": 0.0519207, "altitude_m": 914.4, "airspeed_m_s": 56.2, "type": "fly_over"}
-  ]
-}

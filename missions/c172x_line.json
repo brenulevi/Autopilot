@@ -1,8 +1,0 @@
-{
-  "version": 2,
-  "waypoints": [
-    {"lat_deg": 30.0, "lon_deg": 0.0, "altitude_m": 914.4, "airspeed_m_s": 56.2},
-    {"lat_deg": 30.0179864, "lon_deg": 0.0, "altitude_m": 914.4, "airspeed_m_s": 56.2},
-    {"lat_deg": 30.0359729, "lon_deg": 0.0041538, "altitude_m": 914.4, "airspeed_m_s": 56.2}
-  ]
-}

@@ -1,3 +1,0 @@
-[submodule "third_party/jsbsim"]
-	path = third_party/jsbsim
-	url = https://github.com/JSBSim-Team/jsbsim.git

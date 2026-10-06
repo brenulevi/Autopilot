@@ -3,32 +3,19 @@
   "cmakeMinimumRequired": { "major": 3, "minor": 22, "patch": 0 },
   "configurePresets": [
     {
-      "name": "host",
-      "displayName": "Native simulation (C and C++)",
-      "binaryDir": "${sourceDir}/build/host",
-      "cacheVariables": {
-        "CMAKE_BUILD_TYPE": "Debug",
-        "AUTOPILOT_BUILD_SIM": "ON",
-        "BUILD_TESTING": "ON"
-      }
-    },
-    {
       "name": "core",
-      "displayName": "C library only (no JSBSim or C++ compiler)",
-      "binaryDir": "${sourceDir}/build/core",
+      "displayName": "C library scaffold",
+      "binaryDir": "${sourceDir}/build/core-scaffold",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Debug",
-        "AUTOPILOT_BUILD_SIM": "OFF",
         "BUILD_TESTING": "ON"
       }
     }
   ],
   "buildPresets": [
-    { "name": "host", "configurePreset": "host", "configuration": "Debug" },
-    { "name": "core", "configurePreset": "core", "configuration": "Debug" }
+    { "name": "core", "configurePreset": "core" }
   ],
   "testPresets": [
-    { "name": "host", "configurePreset": "host", "configuration": "Debug", "output": { "outputOnFailure": true } },
-    { "name": "core", "configurePreset": "core", "configuration": "Debug", "output": { "outputOnFailure": true } }
+    { "name": "core", "configurePreset": "core", "output": { "outputOnFailure": true } }
   ]
 }
