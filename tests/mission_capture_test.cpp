@@ -37,7 +37,7 @@ void run(const char* root, const std::filesystem::path& directory, const Case& t
     for (int k = 0; k < 60000; ++k) {
         const auto state = aircraft.state(); const auto nav = aircraft.navigation_state();
         ap_mission_output_t guidance{};
-        check(ap_mission_step(&mission, &nav, 4, config.max_bank_rad, &runtime, &guidance),
+        check(ap_mission_step(&mission, &nav, 4, config.attitude_limits.max_bank_rad, &runtime, &guidance),
               "Capture guidance rejected state");
         if (k == 0) {
             check(guidance.leg_index == test.leg, "Incorrect entry segment");
@@ -69,7 +69,7 @@ void run(const char* root, const std::filesystem::path& directory, const Case& t
                          guidance.airspeed_command_m_s, guidance.altitude_command_m};
         ap_output_t output{};
         check(ap_step(&config, &input, &control, &output), "Controller rejected capture command");
-        check(std::abs(guidance.bank_command_rad) <= config.max_bank_rad, "Capture command exceeded bank limit");
+        check(std::abs(guidance.bank_command_rad) <= config.attitude_limits.max_bank_rad, "Capture command exceeded bank limit");
         max_altitude = std::max(max_altitude, std::abs(static_cast<double>(state.altitude_m - initial.altitude_m)));
         max_speed = std::max(max_speed, std::abs(static_cast<double>(state.airspeed_m_s - initial.airspeed_m_s)));
         max_roll = std::max(max_roll, std::abs(static_cast<double>(state.roll_rad)));

@@ -56,7 +56,7 @@ int main(int argc, char** argv)
         sim::InitialPosition start;
         std::string mode = "manual";
         auto config = sim::c172x_config;
-        std::vector<std::pair<float ap_config_t::*, float>> config_overrides;
+        std::vector<std::pair<void (*)(ap_config_t&, float), float>> config_overrides;
         bool roll_options_set = false;
         bool pitch_options_set = false;
         bool speed_options_set = false;
@@ -83,6 +83,10 @@ int main(int argc, char** argv)
                              "                     [--bank-limit-deg DEGREES] (0 < limit < 90; default 20)\n"
                              "                     [--pitch-limit-deg DEGREES] (absolute attitude; 0 < limit < 90; default 10)\n"
                              "                     [--airspeed-kts KNOTS] (positive; default 100)\n"
+                             "                     [--roll-attitude-gain GAIN] [--roll-rate-kp GAIN] [--roll-rate-ki GAIN]\n"
+                             "                     [--roll-rate-limit-deg-s VALUE]\n"
+                             "                     [--pitch-attitude-gain GAIN] [--pitch-rate-kp GAIN] [--pitch-rate-ki GAIN]\n"
+                             "                     [--pitch-rate-limit-deg-s VALUE]\n"
                              "                     [--roll-kp GAIN] [--roll-kd GAIN]\n"
                              "                     [--pitch-kp GAIN] [--pitch-kd GAIN] [--flightgear]\n"
                              "                     [--realtime] [--telemetry-stdout]\n"
@@ -166,7 +170,7 @@ int main(int argc, char** argv)
                 const double limit = number(value);
                 if (limit <= 0.0 || limit >= 90.0)
                     throw std::invalid_argument("Bank limit must be strictly between 0 and 90 degrees");
-                config_overrides.emplace_back(&ap_config_t::max_bank_rad,
+                config_overrides.emplace_back(+[](ap_config_t& c, float value) { c.attitude_limits.max_bank_rad = value; },
                                                static_cast<float>(limit * sim::radians_per_degree));
                 roll_options_set = true;
             }
@@ -175,33 +179,65 @@ int main(int argc, char** argv)
                 const double limit = number(value);
                 if (limit <= 0.0 || limit >= 90.0)
                     throw std::invalid_argument("Pitch limit must be strictly between 0 and 90 degrees");
-                config_overrides.emplace_back(&ap_config_t::max_pitch_rad,
+                config_overrides.emplace_back(+[](ap_config_t& c, float value) { c.attitude_limits.max_pitch_rad = value; },
                                                static_cast<float>(limit * sim::radians_per_degree));
                 pitch_options_set = true;
             }
+            else if (option == "--roll-attitude-gain") {
+                config_overrides.emplace_back(+[](ap_config_t& c, float setting) { c.roll.attitude.gain = setting; }, static_cast<float>(number(value)));
+                roll_options_set = true;
+            }
+            else if (option == "--roll-rate-kp") {
+                config_overrides.emplace_back(+[](ap_config_t& c, float setting) { c.roll.rate.kp = setting; }, static_cast<float>(number(value)));
+                roll_options_set = true;
+            }
+            else if (option == "--roll-rate-ki") {
+                config_overrides.emplace_back(+[](ap_config_t& c, float setting) { c.roll.rate.ki = setting; }, static_cast<float>(number(value)));
+                roll_options_set = true;
+            }
+            else if (option == "--roll-rate-limit-deg-s") {
+                config_overrides.emplace_back(+[](ap_config_t& c, float setting) { c.roll.attitude.max_rate_rad_s = setting; }, static_cast<float>(number(value) * sim::radians_per_degree));
+                roll_options_set = true;
+            }
             else if (option == "--roll-kp") {
-                config_overrides.emplace_back(&ap_config_t::roll_angle_gain, static_cast<float>(number(value))); roll_options_set = true;
+                config_overrides.emplace_back(+[](ap_config_t& c, float value) { c.roll.attitude.gain = value / c.roll.rate.kp; }, static_cast<float>(number(value))); roll_options_set = true;
             }
             else if (option == "--roll-kd") {
-                config_overrides.emplace_back(&ap_config_t::roll_rate_gain, static_cast<float>(number(value))); roll_options_set = true;
+                config_overrides.emplace_back(+[](ap_config_t& c, float value) { c.roll.attitude.gain *= c.roll.rate.kp / value; c.roll.rate.kp = value; }, static_cast<float>(number(value))); roll_options_set = true;
+            }
+            else if (option == "--pitch-attitude-gain") {
+                config_overrides.emplace_back(+[](ap_config_t& c, float setting) { c.pitch.attitude.gain = setting; }, static_cast<float>(number(value)));
+                pitch_options_set = true;
+            }
+            else if (option == "--pitch-rate-kp") {
+                config_overrides.emplace_back(+[](ap_config_t& c, float setting) { c.pitch.rate.kp = setting; }, static_cast<float>(number(value)));
+                pitch_options_set = true;
+            }
+            else if (option == "--pitch-rate-ki") {
+                config_overrides.emplace_back(+[](ap_config_t& c, float setting) { c.pitch.rate.ki = setting; }, static_cast<float>(number(value)));
+                pitch_options_set = true;
+            }
+            else if (option == "--pitch-rate-limit-deg-s") {
+                config_overrides.emplace_back(+[](ap_config_t& c, float setting) { c.pitch.attitude.max_rate_rad_s = setting; }, static_cast<float>(number(value) * sim::radians_per_degree));
+                pitch_options_set = true;
             }
             else if (option == "--pitch-kp") {
-                config_overrides.emplace_back(&ap_config_t::pitch_angle_gain, static_cast<float>(number(value))); pitch_options_set = true;
+                config_overrides.emplace_back(+[](ap_config_t& c, float value) { c.pitch.attitude.gain = value / c.pitch.rate.kp; }, static_cast<float>(number(value))); pitch_options_set = true;
             }
             else if (option == "--pitch-kd") {
-                config_overrides.emplace_back(&ap_config_t::pitch_rate_gain, static_cast<float>(number(value))); pitch_options_set = true;
+                config_overrides.emplace_back(+[](ap_config_t& c, float value) { c.pitch.attitude.gain *= c.pitch.rate.kp / value; c.pitch.rate.kp = value; }, static_cast<float>(number(value))); pitch_options_set = true;
             }
             else if (option == "--speed-kp") {
-                config_overrides.emplace_back(&ap_config_t::airspeed_kp, static_cast<float>(number(value))); speed_options_set = true;
+                config_overrides.emplace_back(+[](ap_config_t& c, float value) { c.airspeed.kp = value; }, static_cast<float>(number(value))); speed_options_set = true;
             }
             else if (option == "--speed-ki") {
-                config_overrides.emplace_back(&ap_config_t::airspeed_ki, static_cast<float>(number(value))); speed_options_set = true;
+                config_overrides.emplace_back(+[](ap_config_t& c, float value) { c.airspeed.ki = value; }, static_cast<float>(number(value))); speed_options_set = true;
             }
             else if (option == "--altitude-kh") {
-                config_overrides.emplace_back(&ap_config_t::altitude_gain, static_cast<float>(number(value))); altitude_options_set = true;
+                config_overrides.emplace_back(+[](ap_config_t& c, float value) { c.altitude.altitude_gain = value; }, static_cast<float>(number(value))); altitude_options_set = true;
             }
             else if (option == "--altitude-kv") {
-                config_overrides.emplace_back(&ap_config_t::climb_rate_gain, static_cast<float>(number(value))); altitude_options_set = true;
+                config_overrides.emplace_back(+[](ap_config_t& c, float value) { c.altitude.climb_rate_gain = value; }, static_cast<float>(number(value))); altitude_options_set = true;
             }
             else throw std::invalid_argument("Unknown option: " + option);
         }
@@ -213,7 +249,7 @@ int main(int argc, char** argv)
             if (!l1_period_set) l1_period_s = loaded.l1_period_s;
         }
         for (const auto& override_value : config_overrides)
-            config.*(override_value.first) = override_value.second;
+            override_value.first(config, override_value.second);
         const ap_aircraft_config_t effective_config{config, static_cast<float>(l1_period_s), config_sequence};
         if (!ap_config_validate(&effective_config))
             throw std::invalid_argument("Invalid effective aircraft configuration");
@@ -260,27 +296,27 @@ int main(int argc, char** argv)
             std::abs(elevator_pulse) > 1.0 || std::abs(throttle_pulse) > 1.0) {
             throw std::invalid_argument("Duration must be in [0.01, 3600] s and pulses in [-1, 1]");
         }
-        if (std::abs(bank_deg) > 90.0 || !std::isfinite(config.roll_angle_gain) ||
-            config.roll_angle_gain <= 0.0f || !std::isfinite(config.roll_rate_gain) ||
-            config.roll_rate_gain < 0.0f) {
+        if (std::abs(bank_deg) > 90.0 || !std::isfinite(config.roll.attitude.gain) ||
+            config.roll.attitude.gain <= 0.0f || !std::isfinite(config.roll.rate.kp) ||
+            config.roll.rate.kp <= 0.0f) {
             throw std::invalid_argument("Bank input must be within +/-90 deg; finite Kp > 0 and Kd >= 0 required");
         }
-        if (std::abs(pitch_deg) > 90.0 || !std::isfinite(config.pitch_angle_gain) ||
-            config.pitch_angle_gain <= 0.0f || !std::isfinite(config.pitch_rate_gain) ||
-            config.pitch_rate_gain < 0.0f) {
+        if (std::abs(pitch_deg) > 90.0 || !std::isfinite(config.pitch.attitude.gain) ||
+            config.pitch.attitude.gain <= 0.0f || !std::isfinite(config.pitch.rate.kp) ||
+            config.pitch.rate.kp <= 0.0f) {
             throw std::invalid_argument("Pitch input must be within +/-90 deg; finite Kp > 0 and Kd >= 0 required");
         }
         if (airspeed_kts <= 0.0) {
             throw std::invalid_argument("Initial calibrated airspeed must be finite and positive");
         }
-        if (std::abs(speed_step_m_s) > 5.0 || !std::isfinite(config.airspeed_kp) ||
-            config.airspeed_kp < 0.0f || !std::isfinite(config.airspeed_ki) ||
-            config.airspeed_ki <= 0.0f) {
+        if (std::abs(speed_step_m_s) > 5.0 || !std::isfinite(config.airspeed.kp) ||
+            config.airspeed.kp < 0.0f || !std::isfinite(config.airspeed.ki) ||
+            config.airspeed.ki <= 0.0f) {
             throw std::invalid_argument("Speed step must be within +/-5 m/s; finite Kp >= 0 and Ki > 0 required");
         }
         if (std::abs(altitude_step_m) > 20.0 || std::abs(turn_bank_deg) > 15.0 ||
-            !std::isfinite(config.altitude_gain) || config.altitude_gain <= 0.0f ||
-            !std::isfinite(config.climb_rate_gain) || config.climb_rate_gain < 0.0f) {
+            !std::isfinite(config.altitude.altitude_gain) || config.altitude.altitude_gain <= 0.0f ||
+            !std::isfinite(config.altitude.climb_rate_gain) || config.altitude.climb_rate_gain < 0.0f) {
             throw std::invalid_argument("Altitude step must be within +/-20 m, turn bank within +/-15 deg, and altitude gains valid");
         }
         if (l1_period_s < 1.0 || l1_period_s > 30.0 || (!mission_mode && l1_period_set)) {
@@ -324,7 +360,9 @@ int main(int argc, char** argv)
                                                   &north_m, &east_m))
                 throw std::runtime_error("Aircraft start is outside the mission's local projection bounds");
         }
-        ap_runtime_t runtime{};
+        ap_controller_t controller{};
+        if (!ap_controller_init(&controller, &config))
+            throw std::invalid_argument("Invalid controller configuration");
         if (output.has_parent_path()) std::filesystem::create_directories(output.parent_path());
         std::ofstream csv(output);
         if (!csv) throw std::runtime_error("Cannot open CSV: " + output.string());
@@ -342,7 +380,7 @@ int main(int argc, char** argv)
                "altitude_request_m,altitude_command_m,altitude_error_m,"
                "altitude_pitch_limited,altitude_kh,altitude_kv,max_pitch_offset_rad,"
                "lat_deg,lon_deg,north_m,east_m,ground_north_m_s,ground_east_m_s,"
-               "cross_track_m,mission_leg,wind_north_m_s,wind_east_m_s,mission_phase,mission_target_distance_m,waypoint_type\n";
+               "cross_track_m,mission_leg,wind_north_m_s,wind_east_m_s,mission_phase,mission_target_distance_m,waypoint_type,roll_rate_command_rad_s,roll_rate_error_rad_s,roll_rate_limited,roll_rate_integral_norm,roll_attitude_gain,roll_rate_kp,roll_rate_ki,roll_rate_limit_rad_s,pitch_rate_command_rad_s,pitch_rate_error_rad_s,pitch_rate_limited,pitch_rate_integral_norm,pitch_attitude_gain,pitch_rate_kp,pitch_rate_ki,pitch_rate_limit_rad_s\n";
         csv << std::setprecision(10);
 
         const auto steps = static_cast<unsigned long long>(std::ceil(duration_s / dt_s));
@@ -360,7 +398,7 @@ int main(int argc, char** argv)
             if (mission_mode) {
                 nav = aircraft.navigation_state();
                 if (!ap_mission_step(&mission, &nav, static_cast<float>(l1_period_s),
-                                     config.max_bank_rad, &mission_runtime, &mission_output))
+                                     config.attitude_limits.max_bank_rad, &mission_runtime, &mission_output))
                     throw std::runtime_error("Mission guidance rejected navigation, configuration, or infeasible turn geometry");
                 if (mission_output.completed) { mission_completed = true; break; }
             }
@@ -394,7 +432,7 @@ int main(int argc, char** argv)
                                   (altitude_hold ? initial_speed : speed_command),
                                   altitude_command};
             ap_output_t result{};
-            const bool accepted = ap_step(&config, &input, &runtime, &result);
+            const bool accepted = ap_controller_step(&controller, &input, &result);
             if (!accepted) {
                 throw std::runtime_error("C autopilot rejected invalid state, command, configuration, or timestep");
             }
@@ -412,9 +450,9 @@ int main(int argc, char** argv)
                 csv << ",,"; // No bank reference or tracking error in this mode.
             }
             csv << ',' << result.aileron_saturated << ',' << result.bank_command_limited
-                << ',' << (roll_active ? config.roll_angle_gain : 0.0f)
-                << ',' << (roll_active ? config.roll_rate_gain : 0.0f)
-                << ',' << (roll_active ? config.max_aileron : 1.0f)
+                << ',' << (roll_active ? config.roll.attitude.gain * config.roll.rate.kp : 0.0f)
+                << ',' << (roll_active ? config.roll.rate.kp : 0.0f)
+                << ',' << (roll_active ? config.roll.rate.max_aileron_norm : 1.0f)
                 << ',' << aircraft.elevator_position_rad()
                 << ',' << aircraft.upstream_elevator_command()
                 << ',' << aircraft.pitch_trim_command() << ',';
@@ -426,9 +464,9 @@ int main(int argc, char** argv)
                 csv << ",,";
             }
             csv << ',' << result.elevator_saturated << ',' << result.pitch_command_limited
-                << ',' << (pitch_active ? config.pitch_angle_gain : 0.0f)
-                << ',' << (pitch_active ? config.pitch_rate_gain : 0.0f)
-                << ',' << (pitch_active ? config.max_elevator : 1.0f) << ',';
+                << ',' << (pitch_active ? config.pitch.attitude.gain * config.pitch.rate.kp : 0.0f)
+                << ',' << (pitch_active ? config.pitch.rate.kp : 0.0f)
+                << ',' << (pitch_active ? config.pitch.rate.max_elevator_norm : 1.0f) << ',';
             if (speed_active) {
                 csv << (mission_mode ? mission_output.airspeed_command_m_s :
                         (altitude_hold ? initial_speed : speed_command))
@@ -438,11 +476,11 @@ int main(int argc, char** argv)
                 csv << ",,";
             }
             csv << ',' << result.throttle_saturated
-                << ',' << (speed_active ? config.airspeed_kp : 0.0f)
-                << ',' << (speed_active ? config.airspeed_ki : 0.0f)
-                << ',' << (speed_active ? runtime.airspeed_integral_norm : 0.0f)
-                << ',' << (speed_active ? config.min_throttle : 0.0f)
-                << ',' << (speed_active ? config.max_throttle : 1.0f)
+                << ',' << (speed_active ? config.airspeed.kp : 0.0f)
+                << ',' << (speed_active ? config.airspeed.ki : 0.0f)
+                << ',' << (speed_active ? controller.runtime.airspeed.integral_norm : 0.0f)
+                << ',' << (speed_active ? config.airspeed.min_throttle_norm : 0.0f)
+                << ',' << (speed_active ? config.airspeed.max_throttle_norm : 1.0f)
                 << ',' << state.climb_rate_m_s << ',';
             if (altitude_active) {
                 csv << altitude_command << ',' << result.altitude_command_m << ','
@@ -451,9 +489,9 @@ int main(int argc, char** argv)
                 csv << ",,";
             }
             csv << ',' << result.altitude_pitch_limited
-                << ',' << (altitude_active ? config.altitude_gain : 0.0f)
-                << ',' << (altitude_active ? config.climb_rate_gain : 0.0f)
-                << ',' << (altitude_active ? config.max_pitch_offset_rad : 0.0f) << ',';
+                << ',' << (altitude_active ? config.altitude.altitude_gain : 0.0f)
+                << ',' << (altitude_active ? config.altitude.climb_rate_gain : 0.0f)
+                << ',' << (altitude_active ? config.altitude.max_pitch_offset_rad : 0.0f) << ',';
             if (mission_mode) {
                 csv << nav.lat_e7 * 1e-7 << ',' << nav.lon_e7 * 1e-7 << ','
                     << mission_output.north_m << ',' << mission_output.east_m << ',' << nav.ground_north_m_s
@@ -466,7 +504,23 @@ int main(int argc, char** argv)
             if (mission_mode) csv << static_cast<int>(mission_output.phase) << ',' << mission_output.target_distance_m
                                   << ',' << static_cast<int>(mission_output.waypoint_type);
             else csv << ",,";
-            csv << '\n';
+            csv << ',' << result.roll_rate_command_rad_s
+                << ',' << result.roll_rate_error_rad_s
+                << ',' << result.roll_rate_limited
+                << ',' << controller.runtime.roll.integral_norm
+                << ',' << config.roll.attitude.gain
+                << ',' << config.roll.rate.kp
+                << ',' << config.roll.rate.ki
+                << ',' << config.roll.attitude.max_rate_rad_s
+                << ',' << result.pitch_rate_command_rad_s
+                << ',' << result.pitch_rate_error_rad_s
+                << ',' << result.pitch_rate_limited
+                << ',' << controller.runtime.pitch.integral_norm
+                << ',' << config.pitch.attitude.gain
+                << ',' << config.pitch.rate.kp
+                << ',' << config.pitch.rate.ki
+                << ',' << config.pitch.attitude.max_rate_rad_s
+                << '\n';
             if (telemetry_stdout && k % 10 == 0) {
                 const auto telemetry_nav = mission_mode ? nav : aircraft.navigation_state();
                 if (telemetry_nav.valid) {

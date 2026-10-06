@@ -22,7 +22,7 @@ loading an existing file preserves its saved values. Neither is a Skyward profil
 ./build/host/bin/Debug/autopilot_config.exe create logs/my_c172x.apcf
 
 # Edit a record into a new file. Parameter names match the C API; angles are radians.
-./build/host/bin/Debug/autopilot_config.exe set configs/c172x.apcf logs/c172x_tuned.apcf roll_angle_gain=3 roll_rate_gain=0.6 l1_period_s=5
+./build/host/bin/Debug/autopilot_config.exe set configs/c172x.apcf logs/c172x_tuned.apcf roll_attitude_gain=2 roll_rate_kp=2 roll_rate_ki=1 max_roll_rate_rad_s=1 l1_period_s=5
 
 # Run using the saved parameters.
 ./build/host/bin/Debug/autopilot_sim.exe --config logs/c172x_tuned.apcf --mode roll-hold --output logs/configured_roll.csv
@@ -52,20 +52,20 @@ waypoints, target altitude, and target speed remain mission data. JSBSim still
 provides trim. Hardware mixing, sensor settings, and failsafe behavior are not
 implemented by this format. Numeric validation is not flight-envelope validation.
 
-## APCF version 1 format
+## APCF version 2 format
 
-Exactly **80 bytes**, with no compiler padding. Multi-byte integers and IEEE-754
+APCF v2 is exactly **96 bytes**, with no compiler padding. Multi-byte integers and IEEE-754
 binary32 floats are little endian. The target must support 8-bit bytes and
 IEEE-754 binary32 `float`. Do not save a C struct's memory image.
 
 | Byte offset | Size | Encoding | Meaning |
 | --- | --- | --- | --- |
 | 0 | 4 | ASCII `APCF` | Magic identifier |
-| 4 | 2 | uint16 | Format version: 1 |
-| 6 | 2 | uint16 | Payload length: 64 |
+| 4 | 2 | uint16 | Format version: 2 |
+| 6 | 2 | uint16 | Payload length: 80 |
 | 8 | 4 | uint32 | Sequence number |
-| 12 | 64 | 16 float32 values | Parameters below, in order |
-| 76 | 4 | uint32 | CRC32 of bytes 0 through 75 |
+| 12 | 80 | 20 float32 values | Parameters below, in order |
+| 92 | 4 | uint32 | CRC32 of bytes 0 through 91 |
 
 CRC32 is CRC-32/ISO-HDLC, with reflected polynomial `0xEDB88320`, initial value
 `0xFFFFFFFF`, and final XOR `0xFFFFFFFF` (compatible with Python `zlib.crc32`).
@@ -74,12 +74,12 @@ and does not affect the control equations.
 
 | Payload index | Parameter | Units / allowed numeric range |
 | --- | --- | --- |
-| 0 | `roll_angle_gain` | normalized command/rad; > 0 |
-| 1 | `roll_rate_gain` | normalized command/(rad/s); >= 0 |
+| 0 | `roll_attitude_gain` | 1/s; > 0 |
+| 1 | `roll_rate_kp` | normalized effort/(rad/s); > 0 |
 | 2 | `max_bank_rad` | rad; > 0 and < pi/2 |
 | 3 | `max_aileron` | normalized magnitude; > 0 and <= 1 |
-| 4 | `pitch_angle_gain` | normalized command/rad; > 0 |
-| 5 | `pitch_rate_gain` | normalized command/(rad/s); >= 0 |
+| 4 | `pitch_attitude_gain` | 1/s; > 0 |
+| 5 | `pitch_rate_kp` | normalized effort/(rad/s); > 0 |
 | 6 | `max_pitch_rad` | rad; > 0 and < pi/2 |
 | 7 | `max_elevator` | normalized magnitude; > 0 and <= 1 |
 | 8 | `airspeed_kp` | normalized throttle/(m/s); >= 0 |
@@ -90,11 +90,32 @@ and does not affect the control equations.
 | 13 | `climb_rate_gain` | rad/(m/s); >= 0 |
 | 14 | `max_pitch_offset_rad` | rad; > 0 and < pi/2 |
 | 15 | `l1_period_s` | seconds; 1 through 30 |
+| 16 | `roll_rate_ki` | normalized effort/rad; >= 0 |
+| 17 | `max_roll_rate_rad_s` | rad/s; > 0 |
+| 18 | `pitch_rate_ki` | normalized effort/rad; >= 0 |
+| 19 | `max_pitch_rate_rad_s` | rad/s; > 0 |
 
 All fields must be finite. Header values, exact record length, CRC, and parameter
-bounds are checked. No unknown-version migration is attempted. The wire order
+bounds are checked. Unknown versions are rejected; the supported v1 migration is described below. The wire order
 is explicit in the codec; changing the in-memory layout does not change this
 format. Adding or changing wire fields requires a new format version.
+
+## Legacy APCF v1 migration
+
+The decoder also accepts the original 80-byte v1 layout and CRC. With positive
+old roll and pitch damping gains, it derives `attitude_gain = old_angle_gain /
+old_rate_gain` and `rate.kp = old_rate_gain`. Both new rate integrals start with
+`ki = 0`; roll and pitch acquire target limits of 1 and 0.5 rad/s respectively.
+Below those rate limits, with zero integral state, the proportional actuator law
+matches the previous angle-P plus body-rate damping law. Above them, the new
+rate limits intentionally change the demand.
+
+V1 records with zero damping cannot define this rate-feedback cascade and are
+rejected without changing the destination. Unknown versions are also rejected.
+Stored `configs/c172x.apcf` remains an original v1 example; decoding does not
+rewrite it. Use `autopilot_config set` with explicit new fields to save a v2
+record. The tool's field names are the v2 names in the table; old `*_angle_gain`
+names are rejected so their different units cannot silently change meaning.
 
 ## Library and firmware boundary
 
@@ -109,9 +130,14 @@ bool ap_config_decode(const uint8_t *bytes, size_t length,
 ```
 
 The record contains `.control` (`ap_config_t`), `.l1_period_s`, and `.sequence`.
+The in-memory `.control` groups settings into `.roll`, `.pitch`, `.airspeed`,
+`.altitude`, and `.attitude_limits`. Each attitude axis composes `.attitude` and
+`.rate`. For example, `roll_attitude_gain` maps to `.control.roll.attitude.gain`,
+and `roll_rate_ki` maps to `.control.roll.rate.ki`. The codec uses explicit field
+order rather than raw struct storage.
 Both encoder and decoder leave their destination unchanged on failure. They
 use caller-owned buffers and no heap, operating-system, or EEPROM dependencies.
-The encoder writes exactly 80 bytes; the decoder accepts exactly one record.
+The encoder writes exactly 96 bytes; the decoder accepts exactly one v2 or supported v1 record.
 Input and output must not overlap.
 
 `sim::load_config()` and `sim::save_config()` are PC filesystem adapters around

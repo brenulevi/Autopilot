@@ -64,31 +64,31 @@ class ConfigFileTest(unittest.TestCase):
 
     def test_wire_format_and_edit(self):
         # Independent schema oracle; not a C encode/decode roundtrip.
-        fields = [4, .5, math.radians(20), 1, 10, 3, math.radians(10), .5,
-                  .08, .005, 0, 1, .015, .05, math.radians(3), 4]
-        expected = struct.pack("<4sHHI16f", b"APCF", 1, 64, 0, *fields)
+        fields = [2, 2, math.radians(20), 1, 1.5, 4, math.radians(10), .5,
+                  .08, .005, 0, 1, .015, .05, math.radians(3), 4, 1, 1, 4, .5]
+        expected = struct.pack("<4sHHI20f", b"APCF", 2, 80, 0, *fields)
         expected += struct.pack("<I", zlib.crc32(expected))
         self.assertEqual(self.base.read_bytes(), expected)
         shown = self.run_command(TOOL, "show", self.base).stdout
         self.assertIn("sequence=0", shown)
-        self.assertIn("roll_angle_gain=4", shown)
+        self.assertIn("roll_attitude_gain=2", shown)
         edited = self.work / "edited.apcf"
-        self.run_command(TOOL, "set", self.base, edited, "roll_angle_gain=2", "l1_period_s=8")
-        values = struct.unpack("<4sHHI16fI", edited.read_bytes())
+        self.run_command(TOOL, "set", self.base, edited, "roll_attitude_gain=1", "l1_period_s=8")
+        values = struct.unpack("<4sHHI20fI", edited.read_bytes())
         self.assertEqual(values[3], 1)
-        self.assertEqual(values[4], 2)
+        self.assertEqual(values[4], 1)
         self.assertEqual(values[19], 8)
         self.assertEqual(self.base.read_bytes(), expected)
         self.run_command(SIM, "--config", self.base, "--output", self.base, success=False)
         self.assertEqual(self.base.read_bytes(), expected)
-        self.run_command(TOOL, "set", self.base, self.base, "roll_angle_gain=2", success=False)
+        self.run_command(TOOL, "set", self.base, self.base, "roll_attitude_gain=2", success=False)
         self.run_command(TOOL, "create", self.base, success=False)
         self.assertEqual(self.base.read_bytes(), expected)
 
     def test_bad_records_and_parameters(self):
         baseline = self.base.read_bytes()
-        corruptions = [baseline[:-1], baseline + b"x", bytes(80)]
-        for offset, replacement in [(4, b"\x02"), (6, b"\x00"),
+        corruptions = [baseline[:-1], baseline + b"x", bytes(96)]
+        for offset, replacement in [(4, b"\x03"), (6, b"\x00"),
                                     (12, struct.pack("<f", float("nan"))),
                                     (52, struct.pack("<f", 1.0))]:
             data = bytearray(baseline)
@@ -104,8 +104,8 @@ class ConfigFileTest(unittest.TestCase):
             self.run_command(TOOL, "show", path, success=False)
             output, _ = self.simulate(f"bad{index}", "--config", path, success=False)
             self.assertFalse(output.exists())
-        for value in ["roll_angle_gain=0", "pitch_rate_gain=-1", "max_bank_rad=2",
-                      "airspeed_ki=nan", "l1_period_s=31", "unknown=1", "roll_angle_gain=1x"]:
+        for value in ["roll_attitude_gain=0", "pitch_rate_kp=-1", "max_bank_rad=2",
+                      "airspeed_ki=nan", "l1_period_s=31", "unknown=1", "roll_attitude_gain=1x"]:
             output = self.work / "invalid.apcf"
             self.run_command(TOOL, "set", self.base, output, value, success=False)
             self.assertFalse(output.exists())
@@ -123,7 +123,7 @@ class ConfigFileTest(unittest.TestCase):
         loaded, _ = self.simulate("loaded", "--config", self.base)
         self.assertEqual(default.read_bytes(), loaded.read_bytes())
         edited = self.work / "limited.apcf"
-        self.run_command(TOOL, "set", self.base, edited, "roll_angle_gain=2", "max_bank_rad=0.04")
+        self.run_command(TOOL, "set", self.base, edited, "roll_attitude_gain=1", "max_bank_rad=0.04")
         changed, _ = self.simulate("changed", "--config", edited)
         with changed.open(newline="") as stream:
             rows = list(csv.DictReader(stream))
@@ -155,6 +155,53 @@ class ConfigFileTest(unittest.TestCase):
         changed = run("changed_l1", "--config", edited)
         self.assertNotEqual(base, changed)
         self.assertEqual(base, run("override_l1", "--l1-period-s", "4", "--config", edited))
+
+    def test_legacy_v1_migration(self):
+        fields = [4, .5, math.radians(20), .5, 10, 3, math.radians(10), .5,
+                  .08, .005, 0, 1, .015, .05, math.radians(3), 4]
+        data = struct.pack("<4sHHI16f", b"APCF", 1, 64, 0, *fields)
+        data += struct.pack("<I", zlib.crc32(data))
+        legacy = self.work / "legacy.apcf"
+        legacy.write_bytes(data)
+        shown = self.run_command(TOOL, "show", legacy).stdout
+        self.assertIn("roll_attitude_gain=8", shown)
+        self.assertIn("roll_rate_ki=0", shown)
+        self.assertIn("max_roll_rate_rad_s=1", shown)
+        self.simulate("legacy_loaded", "--config", legacy)
+        migrated = self.work / "migrated.apcf"
+        self.run_command(TOOL, "set", legacy, migrated, "roll_rate_ki=0.1")
+        self.assertEqual(len(migrated.read_bytes()), 96)
+        self.assertEqual(struct.unpack_from("<H", migrated.read_bytes(), 4)[0], 2)
+        self.assertEqual(legacy.read_bytes(), data)
+        invalid = bytearray(data)
+        struct.pack_into("<f", invalid, 16, 0.0)
+        invalid[-4:] = struct.pack("<I", zlib.crc32(invalid[:-4]))
+        legacy.write_bytes(invalid)
+        self.run_command(TOOL, "show", legacy, success=False)
+        # Old normalized-angle units must never be accepted as new attitude gains.
+        self.run_command(TOOL, "set", self.base, self.work / "old_names.apcf",
+                         "roll_angle_gain=4", success=False)
+
+    def test_explicit_rate_limits_and_telemetry(self):
+        for axis in ("roll", "pitch"):
+            for direction in (1, -1):
+                output = self.work / f"{axis}_rate_limit_{direction}.csv"
+                flag = "bank" if axis == "roll" else "pitch"
+                self.run_command(SIM, "--mode", f"{axis}-hold", "--duration", "2.1",
+                                 f"--{flag}-deg", str(5 * direction),
+                                 f"--{axis}-rate-limit-deg-s", str(math.degrees(.01)),
+                                 "--output", output)
+                with output.open() as stream:
+                    row = list(csv.DictReader(stream))[-1]
+                self.assertEqual(row[f"{axis}_rate_limited"], "1")
+                rate_target = float(row[f"{axis}_rate_command_rad_s"])
+                self.assertAlmostEqual(rate_target, .01 * direction, places=6)
+                body_rate = float(row["p_rad_s" if axis == "roll" else "q_rad_s"])
+                self.assertAlmostEqual(float(row[f"{axis}_rate_error_rad_s"]), rate_target - body_rate, places=6)
+                self.assertAlmostEqual(float(row[f"{axis}_rate_limit_rad_s"]), .01, places=6)
+            for name, invalid in (("attitude-gain", "0"), ("rate-kp", "0"),
+                                  ("rate-ki", "-1"), ("rate-limit-deg-s", "0")):
+                self.run_command(SIM, "--mode", f"{axis}-hold", f"--{axis}-{name}", invalid, success=False)
 
 
 if __name__ == "__main__":

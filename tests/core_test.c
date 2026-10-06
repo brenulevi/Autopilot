@@ -16,7 +16,11 @@ int main(void)
     /* Keep repetitive stateless checks readable while exercising the unified API. */
 #define ap_step(config_value, input_value, output_value) \
     ap_step(config_value, input_value, &runtime, output_value)
-    ap_config_t config = {2.0f, 0.3f, 0.35f, 0.5f, 3.0f, 0.5f, 0.2f, 0.5f};
+    ap_config_t config = {
+        .roll = {{2.0f / 0.3f, 10.0f}, {0.3f, 0.0f, 0.5f}},
+        .pitch = {{6.0f, 10.0f}, {0.5f, 0.0f, 0.5f}},
+        .attitude_limits = {0.35f, 0.2f}
+    };
     input.dt_s = 0.01f;
     input.requested = (ap_controls_t){2.0f, -2.0f, 0.25f, 1.2f};
     CHECK(ap_step(NULL, &input, &output));
@@ -75,19 +79,19 @@ int main(void)
     CHECK(output.aileron_saturated && output.controls.aileron == -0.5f);
 
     CHECK(!ap_step(NULL, &input, &output));
-    config.roll_angle_gain = -1.0f;
+    config.roll.attitude.gain = -1.0f;
     CHECK(!ap_step(&config, &input, &output));
-    config.roll_angle_gain = NAN;
+    config.roll.attitude.gain = NAN;
     CHECK(!ap_step(&config, &input, &output));
-    config.roll_angle_gain = FLT_MAX;
+    config.roll.attitude.gain = FLT_MAX;
     input.state.roll_rad = -FLT_MAX;
     CHECK(!ap_step(&config, &input, &output));
     CHECK(output.controls.aileron == -0.5f && output.bank_command_limited);
     input.state.roll_rad = 0.0f;
-    config.roll_angle_gain = 2.0f;
-    config.max_aileron = 1.1f;
+    config.roll.attitude.gain = 2.0f;
+    config.roll.rate.max_aileron_norm = 1.1f;
     CHECK(!ap_step(&config, &input, &output));
-    config.max_aileron = 0.5f;
+    config.roll.rate.max_aileron_norm = 0.5f;
     input.bank_command_rad = NAN;
     CHECK(!ap_step(&config, &input, &output));
 
@@ -120,9 +124,9 @@ int main(void)
     CHECK(ap_step(&config, &input, &output));
     CHECK(output.pitch_command_limited && output.pitch_command_rad == -0.2f);
     CHECK(output.elevator_saturated && output.controls.elevator == 0.5f);
-    config.pitch_angle_gain = NAN;
+    config.pitch.attitude.gain = NAN;
     CHECK(!ap_step(&config, &input, &output));
-    config.pitch_angle_gain = 3.0f;
+    config.pitch.attitude.gain = 3.0f;
     input.pitch_command_rad = NAN;
     CHECK(!ap_step(&config, &input, &output));
     input.pitch_command_rad = 0.0f;
@@ -141,11 +145,11 @@ int main(void)
           output.controls.throttle == input.requested.throttle);
     CHECK(output.bank_command_rad == 0.1f && output.pitch_command_rad == 0.1f);
     const ap_output_t previous = output;
-    config.pitch_angle_gain = NAN;
+    config.pitch.attitude.gain = NAN;
     CHECK(!ap_step(&config, &input, &output));
     CHECK(output.controls.aileron == previous.controls.aileron &&
           output.controls.elevator == previous.controls.elevator);
-    config.pitch_angle_gain = 3.0f;
+    config.pitch.attitude.gain = 3.0f;
     input.mode = (ap_mode_t)99;
     CHECK(!ap_step(&config, &input, &output));
 #undef ap_step

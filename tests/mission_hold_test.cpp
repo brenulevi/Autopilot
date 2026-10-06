@@ -43,7 +43,7 @@ void run_case(const char* data_root, double wind_east_m_s)
         const auto state = aircraft.state();
         const auto nav = aircraft.navigation_state();
         ap_mission_output_t guidance{};
-        check(ap_mission_step(&mission, &nav, 4.0f, config.max_bank_rad,
+        check(ap_mission_step(&mission, &nav, 4.0f, config.attitude_limits.max_bank_rad,
                               &mission_runtime, &guidance), "Mission guidance rejected JSBSim state");
         if (guidance.completed) { completed = true; break; }
         if (guidance.leg_index == 1) saw_second_leg = true;
@@ -73,7 +73,7 @@ void run_case(const char* data_root, double wind_east_m_s)
     check(settled_cross_track < 5.0, "Late cross-track exceeded 5 m");
     check(settled_altitude_error < 0.5, "Late altitude error exceeded 0.5 m");
     check(settled_speed_error < 0.5, "Late speed error exceeded 0.5 m/s");
-    check(largest_bank <= config.max_bank_rad, "Bank command exceeded limit");
+    check(largest_bank <= config.attitude_limits.max_bank_rad, "Bank command exceeded limit");
 }
 
 int main(int argc, char** argv)
