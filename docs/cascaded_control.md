@@ -11,14 +11,17 @@ For roll, `p_target = clamp(K_attitude * bank_error, +/-p_max)` and
 `aileron = trim + K_rate * (p_target - p_measured) + I_roll`.
 For pitch, `q_target = clamp(K_attitude * pitch_error, +/-q_max)` and
 `elevator = trim - (K_rate * (q_target - q_measured) + I_pitch)`.
+When coordinated yaw control is active, its turn feedforward is added to the
+pitch-rate target and the result is bounded by the pitch-rate limit.
 Outer gains have units 1/s. Inner Kp is normalized effort/(rad/s), and Ki is
 normalized effort/rad. `dt_s` now affects roll and pitch integration.
 
 The outer mappings are near-level approximations. Euler bank/pitch derivatives
 are not identified with body rates in general maneuvers. There is no quaternion
-attitude mapping, coordinated yaw-rate target, airspeed scheduling, or control
+attitude mapping, airspeed gain scheduling, or control
 allocation in this implementation. The C172X tests cover the stated simulator
 operating point; further envelope testing is required for another aircraft.
+The combined modes now include [coordinated yaw-rate control](yaw_control.md).
 
 ## Ownership and limiting
 
@@ -48,7 +51,7 @@ The compiled C172X baseline in `sim/include/sim/c172x_config.hpp` uses:
 These gains were tuned in ideal-state JSBSim runs. They are a C172X simulation
 baseline; they require separate tuning and validation for the Skyward.
 
-Measured maxima from the final defaults at 100 kt CAS / 3000 ft MSL:
+Measured maxima before adding yaw coordination at 100 kt CAS / 3000 ft MSL:
 
 | Case, both directions | Tracking error | Return error |
 | --- | --- | --- |
@@ -89,5 +92,5 @@ strictly positive. Use explicit cascade flags when tuning stages independently.
 CSV retains `roll_kp`/`pitch_kp` as equivalent proportional angle coefficients and
 `roll_kd`/`pitch_kd` as rate Kp for existing plots. New columns expose each rate
 target, measured-rate error, target limiting, integral, actual stage gains, and
-rate limit. APCF v2 saves all settings; see [configuration](configuration.md) for
-v1 conversion and the changed gain units.
+rate limit. APCF v3 saves all settings; see [configuration](configuration.md) for
+v1/v2 conversion and the changed gain units.

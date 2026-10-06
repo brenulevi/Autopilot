@@ -146,6 +146,12 @@ double JsbsimAdapter::upstream_elevator_command() const
 double JsbsimAdapter::pitch_trim_command() const
 { return fdm_->GetPropertyValue("fcs/pitch-trim-cmd-norm"); }
 
+double JsbsimAdapter::sideslip_rad() const
+{ return fdm_->GetPropertyValue("aero/beta-rad"); }
+
+double JsbsimAdapter::lateral_specific_force_m_s2() const
+{ return fdm_->GetPropertyValue("accelerations/a-pilot-y-ft_sec2") * meters_per_foot; }
+
 void JsbsimAdapter::step(const ap_controls_t& controls)
 {
     fdm_->SetPropertyValue("fcs/aileron-cmd-norm", controls.aileron);

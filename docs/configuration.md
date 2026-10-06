@@ -52,20 +52,20 @@ waypoints, target altitude, and target speed remain mission data. JSBSim still
 provides trim. Hardware mixing, sensor settings, and failsafe behavior are not
 implemented by this format. Numeric validation is not flight-envelope validation.
 
-## APCF version 2 format
+## APCF version 3 format
 
-APCF v2 is exactly **96 bytes**, with no compiler padding. Multi-byte integers and IEEE-754
+APCF v3 is exactly **128 bytes**, with no compiler padding. Multi-byte integers and IEEE-754
 binary32 floats are little endian. The target must support 8-bit bytes and
 IEEE-754 binary32 `float`. Do not save a C struct's memory image.
 
 | Byte offset | Size | Encoding | Meaning |
 | --- | --- | --- | --- |
 | 0 | 4 | ASCII `APCF` | Magic identifier |
-| 4 | 2 | uint16 | Format version: 2 |
-| 6 | 2 | uint16 | Payload length: 80 |
+| 4 | 2 | uint16 | Format version: 3 |
+| 6 | 2 | uint16 | Payload length: 112 |
 | 8 | 4 | uint32 | Sequence number |
-| 12 | 80 | 20 float32 values | Parameters below, in order |
-| 92 | 4 | uint32 | CRC32 of bytes 0 through 91 |
+| 12 | 112 | 28 float32 values | Parameters below, in order |
+| 124 | 4 | uint32 | CRC32 of bytes 0 through 123 |
 
 CRC32 is CRC-32/ISO-HDLC, with reflected polynomial `0xEDB88320`, initial value
 `0xFFFFFFFF`, and final XOR `0xFFFFFFFF` (compatible with Python `zlib.crc32`).
@@ -94,13 +94,22 @@ and does not affect the control equations.
 | 17 | `max_roll_rate_rad_s` | rad/s; > 0 |
 | 18 | `pitch_rate_ki` | normalized effort/rad; >= 0 |
 | 19 | `max_pitch_rate_rad_s` | rad/s; > 0 |
+| 20 | `yaw_enabled` | exactly 0 or 1, encoded as float32 |
+| 21 | `yaw_rate_kp` | normalized effort/(rad/s); > 0 when enabled |
+| 22 | `yaw_rate_ki` | normalized effort/rad; >= 0 when enabled |
+| 23 | `max_rudder` | absolute normalized magnitude; > 0 and <= 1 when enabled |
+| 24 | `rudder_sign` | +1 or -1 when enabled; sign of body r response to positive rudder |
+| 25 | `max_yaw_rate_rad_s` | rad/s; > 0 when enabled |
+| 26 | `yaw_min_airspeed_m_s` | TAS denominator floor, m/s; > 0 when enabled |
+| 27 | `yaw_max_bank_rad` | measured-bank model clamp, rad; > 0 and < pi/2 when enabled |
 
 All fields must be finite. Header values, exact record length, CRC, and parameter
-bounds are checked. Unknown versions are rejected; the supported v1 migration is described below. The wire order
+bounds are checked. Disabled yaw fields may be zero, but must remain finite.
+Unknown versions are rejected; supported v1/v2 migration is described below. The wire order
 is explicit in the codec; changing the in-memory layout does not change this
 format. Adding or changing wire fields requires a new format version.
 
-## Legacy APCF v1 migration
+## Legacy APCF v1 and v2 migration
 
 The decoder also accepts the original 80-byte v1 layout and CRC. With positive
 old roll and pitch damping gains, it derives `attitude_gain = old_angle_gain /
@@ -113,9 +122,16 @@ rate limits intentionally change the demand.
 V1 records with zero damping cannot define this rate-feedback cascade and are
 rejected without changing the destination. Unknown versions are also rejected.
 Stored `configs/c172x.apcf` remains an original v1 example; decoding does not
-rewrite it. Use `autopilot_config set` with explicit new fields to save a v2
-record. The tool's field names are the v2 names in the table; old `*_angle_gain`
+rewrite it. Use `autopilot_config set` with explicit new fields to save a v3
+record. The tool's field names are the names in the table; old `*_angle_gain`
 names are rejected so their different units cannot silently change meaning.
+
+V2 remains a supported 96-byte layout with its original twenty float fields and
+CRC. Their values carry over unchanged. Both v1 and v2 decode with yaw disabled
+and zero yaw parameters, preserving rudder passthrough and the old pitch law.
+Enabling yaw on a legacy profile requires setting all yaw parameters. New records
+created from the compiled C172X defaults enable coordinated yaw control; see
+[yaw control](yaw_control.md). The supplied v1 file remains unchanged.
 
 ## Library and firmware boundary
 
@@ -131,13 +147,13 @@ bool ap_config_decode(const uint8_t *bytes, size_t length,
 
 The record contains `.control` (`ap_config_t`), `.l1_period_s`, and `.sequence`.
 The in-memory `.control` groups settings into `.roll`, `.pitch`, `.airspeed`,
-`.altitude`, and `.attitude_limits`. Each attitude axis composes `.attitude` and
+`.altitude`, `.attitude_limits`, and `.yaw`. Each attitude axis composes `.attitude` and
 `.rate`. For example, `roll_attitude_gain` maps to `.control.roll.attitude.gain`,
 and `roll_rate_ki` maps to `.control.roll.rate.ki`. The codec uses explicit field
 order rather than raw struct storage.
 Both encoder and decoder leave their destination unchanged on failure. They
 use caller-owned buffers and no heap, operating-system, or EEPROM dependencies.
-The encoder writes exactly 96 bytes; the decoder accepts exactly one v2 or supported v1 record.
+The encoder writes exactly 128 bytes; the decoder accepts exactly one v3 or supported v1/v2 record.
 Input and output must not overlap.
 
 `sim::load_config()` and `sim::save_config()` are PC filesystem adapters around

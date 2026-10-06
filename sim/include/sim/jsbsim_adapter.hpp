@@ -36,6 +36,8 @@ public:
     double elevator_position_rad() const;
     double upstream_elevator_command() const;
     double pitch_trim_command() const;
+    double sideslip_rad() const;
+    double lateral_specific_force_m_s2() const;
     void step(const ap_controls_t& controls);
 
 private:

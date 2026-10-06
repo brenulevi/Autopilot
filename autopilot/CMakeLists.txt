@@ -9,6 +9,8 @@ add_library(autopilot STATIC
     src/control/pitch_attitude.c
     src/control/pitch_rate.c
     src/control/airspeed.c
+    src/control/yaw_rate.c
+    src/control/turn_coordination.c
     src/guidance/bank_limit.c
     src/guidance/pitch_limit.c
     src/guidance/altitude.c

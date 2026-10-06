@@ -171,9 +171,9 @@ The command above does not yet build a flashable MCU application.
 
 ## First experiment
 
-Aircraft control/guidance settings can now be saved in a **96-byte binary
-APCF v2 file**, with version, sequence number, and CRC32. Supported 80-byte v1
-files are converted when loaded. The C codec is portable
+Aircraft control/guidance settings can now be saved in a **128-byte binary
+APCF v3 file**, with version, sequence number, and CRC32. Supported 80-byte v1
+and 96-byte v2 files are converted when loaded, with yaw control disabled. The C codec is portable
 to future EEPROM storage; the host tool reads/writes files without JSON.
 
 ```powershell
@@ -410,7 +410,9 @@ error, pitch rate, elevator demand, airspeed, and altitude.
 `ap_step()` call. The existing roll and pitch modules independently compute
 aileron and elevator commands; the result is applied to JSBSim in the same
 simulation tick. If either axis rejects its input, `ap_step()` returns failure
-without changing the caller's output. Rudder and throttle stay at trim.
+without changing the caller's output or controller runtime. Throttle stays at
+trim. With yaw enabled, a coordinated body-rate reference drives a rudder PI
+loop and supplies pitch-rate feedforward; see [yaw control](docs/yaw_control.md).
 
 ```powershell
 ./build/host/bin/Debug/autopilot_sim.exe --mode attitude-hold
@@ -509,8 +511,9 @@ The altitude command is the initial MSL altitude until 2 s, initial +5 m
 during [2, 30) s, then initial altitude again. The optional bank command is
 +5 degrees during [40, 60) s and zero otherwise. A negative step or bank can
 be selected with `--altitude-step-m` or `--turn-bank-deg`. The banked segment
-tests altitude control while the aircraft turns; it does not implement
-heading/course guidance or coordinated rudder control. CSV columns and plots
+tests altitude control while the aircraft turns. Combined attitude, airspeed,
+altitude, and mission modes now use coordinated rudder control when enabled in
+the profile; see [yaw control](docs/yaw_control.md). CSV columns and plots
 show target and measured altitude, climb rate, pitch and bank, true airspeed,
 and limiter flags. `--altitude-kh` and `--altitude-kv` allow gain experiments.
 

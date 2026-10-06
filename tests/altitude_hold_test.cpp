@@ -41,7 +41,7 @@ void run_case(const char* root, double step_m, double turn_bank_deg)
         ap_output_t output{};
         check(ap_step(&config, &input, &runtime, &output),
               "Altitude hold rejected simulation state");
-        check(output.controls.rudder == trim.rudder, "Altitude hold changed rudder");
+        check(output.yaw_control_active && !output.rudder_saturated, "Altitude hold yaw control inactive or saturated");
         check(std::abs(output.altitude_error_m - (altitude_command - state.altitude_m)) < 1e-4f,
               "Altitude error has incorrect sign");
         check(output.controls.throttle >= 0.0f && output.controls.throttle <= 1.0f,

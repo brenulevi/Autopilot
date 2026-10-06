@@ -26,16 +26,27 @@ static bool ap_step_attitude(const ap_config_t *config, const ap_input_t *input,
     /* Work locally so errors never leave a partly updated output. */
     ap_output_t result = {0};
     ap_manual_bound(&input->requested, &result);
+    ap_turn_coordination_output_t turn = {0};
 
     switch (input->mode) {
     case AP_MODE_MANUAL:
         runtime->roll.integral_norm = 0.0f;
         runtime->pitch.integral_norm = 0.0f;
+        runtime->yaw.integral_norm = 0.0f;
         break;
     case AP_MODE_ROLL_HOLD:
     case AP_MODE_PITCH_HOLD:
     case AP_MODE_ATTITUDE_HOLD:
         if (config == NULL) return false;
+        const bool yaw_active = input->mode == AP_MODE_ATTITUDE_HOLD && config->yaw.enabled;
+        if (yaw_active) {
+            const ap_turn_coordination_input_t turn_input = {
+                input->state.roll_rad, input->state.pitch_rad, input->state.airspeed_m_s
+            };
+            if (!ap_turn_coordination_compute(&config->yaw.coordination, &turn_input, &turn)) return false;
+        } else {
+            runtime->yaw.integral_norm = 0.0f;
+        }
         if (input->mode == AP_MODE_PITCH_HOLD) runtime->roll.integral_norm = 0.0f;
         if (input->mode == AP_MODE_ROLL_HOLD) runtime->pitch.integral_norm = 0.0f;
         if (input->mode != AP_MODE_PITCH_HOLD) {
@@ -71,6 +82,13 @@ static bool ap_step_attitude(const ap_config_t *config, const ap_input_t *input,
             };
             ap_pitch_attitude_output_t reference;
             if (!ap_pitch_attitude_compute(&config->pitch.attitude, &attitude, &reference)) return false;
+            const float raw_pitch_rate = reference.body_rate_command_rad_s + turn.pitch_rate_feedforward_rad_s;
+            if (!isfinite(raw_pitch_rate)) return false;
+            const float pitch_rate_limit = config->pitch.attitude.max_rate_rad_s;
+            if (raw_pitch_rate > pitch_rate_limit) reference.body_rate_command_rad_s = pitch_rate_limit;
+            else if (raw_pitch_rate < -pitch_rate_limit) reference.body_rate_command_rad_s = -pitch_rate_limit;
+            else reference.body_rate_command_rad_s = raw_pitch_rate;
+            reference.limited = reference.limited || reference.body_rate_command_rad_s != raw_pitch_rate;
             const ap_pitch_rate_input_t rate_input = {
                 input->state.q_rad_s, reference.body_rate_command_rad_s,
                 input->requested.elevator, input->dt_s
@@ -83,6 +101,23 @@ static bool ap_step_attitude(const ap_config_t *config, const ap_input_t *input,
             result.pitch_rate_command_rad_s = reference.body_rate_command_rad_s;
             result.pitch_rate_error_rad_s = rate_output.error_rad_s;
             result.pitch_rate_limited = reference.limited;
+        }
+        if (yaw_active) {
+            const ap_yaw_rate_input_t yaw_input = {
+                input->state.r_rad_s, turn.yaw_rate_command_rad_s,
+                input->requested.rudder, input->dt_s
+            };
+            ap_yaw_rate_output_t yaw_output;
+            if (!ap_yaw_rate_compute(&config->yaw.rate, &yaw_input, &runtime->yaw, &yaw_output)) return false;
+            result.controls.rudder = yaw_output.rudder_norm;
+            result.rudder_saturated = yaw_output.saturated;
+            result.yaw_control_active = true;
+            result.yaw_rate_command_rad_s = turn.yaw_rate_command_rad_s;
+            result.yaw_rate_error_rad_s = yaw_output.error_rad_s;
+            result.pitch_coordination_ff_rad_s = turn.pitch_rate_feedforward_rad_s;
+            result.yaw_rate_limited = turn.rate_limited;
+            result.yaw_airspeed_guarded = turn.airspeed_guarded;
+            result.yaw_bank_limited = turn.bank_limited;
         }
         break;
     default:

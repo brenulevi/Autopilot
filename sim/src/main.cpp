@@ -43,6 +43,7 @@ int main(int argc, char** argv)
         bool duration_set = false;
         double pulse = 0.05;
         double elevator_pulse = 0.0;
+        double rudder_pulse = 0.0;
         double throttle_pulse = 0.0;
         double bank_deg = 5.0;
         double pitch_deg = 2.0;
@@ -65,6 +66,7 @@ int main(int argc, char** argv)
         bool l1_period_set = false;
         bool aileron_pulse_set = false;
         bool elevator_pulse_set = false;
+        bool rudder_pulse_set = false;
         bool throttle_pulse_set = false;
         bool flightgear = false;
         bool realtime = false;
@@ -87,6 +89,10 @@ int main(int argc, char** argv)
                              "                     [--roll-rate-limit-deg-s VALUE]\n"
                              "                     [--pitch-attitude-gain GAIN] [--pitch-rate-kp GAIN] [--pitch-rate-ki GAIN]\n"
                              "                     [--pitch-rate-limit-deg-s VALUE]\n"
+                             "                     [--yaw-enabled 0|1] [--yaw-rate-kp GAIN] [--yaw-rate-ki GAIN]\n"
+                             "                     [--rudder-sign -1|1] [--rudder-limit VALUE] [--rudder-pulse VALUE]\n"
+                             "                     [--yaw-rate-limit-deg-s VALUE] [--yaw-min-airspeed-m-s VALUE]\n"
+                             "                     [--yaw-bank-limit-deg VALUE]\n"
                              "                     [--roll-kp GAIN] [--roll-kd GAIN]\n"
                              "                     [--pitch-kp GAIN] [--pitch-kd GAIN] [--flightgear]\n"
                              "                     [--realtime] [--telemetry-stdout]\n"
@@ -144,6 +150,7 @@ int main(int argc, char** argv)
             else if (option == "--start-lat-deg") start.latitude_deg = number(value);
             else if (option == "--start-lon-deg") start.longitude_deg = number(value);
             else if (option == "--start-heading-deg") start.heading_deg = number(value);
+            else if (option == "--rudder-pulse") { rudder_pulse = number(value); rudder_pulse_set = true; pulse = 0.0; }
             else if (option == "--duration") { duration_s = number(value); duration_set = true; }
             else if (option == "--airspeed-kts") airspeed_kts = number(value);
             else if (option == "--speed-step-m-s") { speed_step_m_s = number(value); speed_step_set = true; }
@@ -230,6 +237,32 @@ int main(int argc, char** argv)
             else if (option == "--speed-kp") {
                 config_overrides.emplace_back(+[](ap_config_t& c, float value) { c.airspeed.kp = value; }, static_cast<float>(number(value))); speed_options_set = true;
             }
+            else if (option == "--yaw-enabled") {
+                const double parsed = number(value);
+                if (parsed != 0.0 && parsed != 1.0) throw std::invalid_argument("yaw-enabled must be 0 or 1");
+                config_overrides.emplace_back(+[](ap_config_t& c, float v) { c.yaw.enabled = v == 1.0f; }, static_cast<float>(parsed));
+            }
+            else if (option == "--yaw-rate-kp") {
+                config_overrides.emplace_back(+[](ap_config_t& c, float v) { c.yaw.rate.kp = v; }, static_cast<float>(number(value)));
+            }
+            else if (option == "--yaw-rate-ki") {
+                config_overrides.emplace_back(+[](ap_config_t& c, float v) { c.yaw.rate.ki = v; }, static_cast<float>(number(value)));
+            }
+            else if (option == "--rudder-limit") {
+                config_overrides.emplace_back(+[](ap_config_t& c, float v) { c.yaw.rate.max_rudder_norm = v; }, static_cast<float>(number(value)));
+            }
+            else if (option == "--rudder-sign") {
+                config_overrides.emplace_back(+[](ap_config_t& c, float v) { c.yaw.rate.rudder_sign = v; }, static_cast<float>(number(value)));
+            }
+            else if (option == "--yaw-min-airspeed-m-s") {
+                config_overrides.emplace_back(+[](ap_config_t& c, float v) { c.yaw.coordination.min_airspeed_m_s = v; }, static_cast<float>(number(value)));
+            }
+            else if (option == "--yaw-rate-limit-deg-s") {
+                config_overrides.emplace_back(+[](ap_config_t& c, float v) { c.yaw.coordination.max_rate_rad_s = v; }, static_cast<float>(number(value) * sim::radians_per_degree));
+            }
+            else if (option == "--yaw-bank-limit-deg") {
+                config_overrides.emplace_back(+[](ap_config_t& c, float v) { c.yaw.coordination.max_bank_rad = v; }, static_cast<float>(number(value) * sim::radians_per_degree));
+            }
             else if (option == "--speed-ki") {
                 config_overrides.emplace_back(+[](ap_config_t& c, float value) { c.airspeed.ki = value; }, static_cast<float>(number(value))); speed_options_set = true;
             }
@@ -272,7 +305,7 @@ int main(int argc, char** argv)
         const bool speed_active = speed_hold || altitude_active;
         const bool roll_active = roll_hold || attitude_hold || speed_active;
         const bool pitch_active = pitch_hold || attitude_hold || speed_active;
-        if ((mode != "manual" && (aileron_pulse_set || elevator_pulse_set)) ||
+        if ((mode != "manual" && (aileron_pulse_set || elevator_pulse_set || rudder_pulse_set)) ||
             (mode != "manual" && mode != "attitude-hold" && throttle_pulse_set) ||
             (mode != "roll-hold" && mode != "attitude-hold" && !altitude_active && roll_options_set) ||
             (mode != "pitch-hold" && mode != "attitude-hold" && !altitude_active && pitch_options_set) ||
@@ -280,7 +313,7 @@ int main(int argc, char** argv)
             (!speed_hold && speed_step_set) ||
             (!altitude_hold && altitude_options_set) ||
             (mission_mode != !mission_path.empty()) ||
-            (static_cast<int>(aileron_pulse_set) + static_cast<int>(elevator_pulse_set) +
+            (static_cast<int>(aileron_pulse_set) + static_cast<int>(elevator_pulse_set) + static_cast<int>(rudder_pulse_set) +
              static_cast<int>(throttle_pulse_set) > 1)) {
             throw std::invalid_argument("Pulse and attitude options must match their modes; choose one pulse axis");
         }
@@ -293,7 +326,7 @@ int main(int argc, char** argv)
             (roll_hold ? "logs/c172x_roll_hold.csv" :
             (pitch_hold ? "logs/c172x_pitch_hold.csv" : "logs/c172x_pulse.csv")))));
         if (duration_s < dt_s || duration_s > 3600.0 || std::abs(pulse) > 1.0 ||
-            std::abs(elevator_pulse) > 1.0 || std::abs(throttle_pulse) > 1.0) {
+            std::abs(elevator_pulse) > 1.0 || std::abs(rudder_pulse) > 1.0 || std::abs(throttle_pulse) > 1.0) {
             throw std::invalid_argument("Duration must be in [0.01, 3600] s and pulses in [-1, 1]");
         }
         if (std::abs(bank_deg) > 90.0 || !std::isfinite(config.roll.attitude.gain) ||
@@ -380,7 +413,7 @@ int main(int argc, char** argv)
                "altitude_request_m,altitude_command_m,altitude_error_m,"
                "altitude_pitch_limited,altitude_kh,altitude_kv,max_pitch_offset_rad,"
                "lat_deg,lon_deg,north_m,east_m,ground_north_m_s,ground_east_m_s,"
-               "cross_track_m,mission_leg,wind_north_m_s,wind_east_m_s,mission_phase,mission_target_distance_m,waypoint_type,roll_rate_command_rad_s,roll_rate_error_rad_s,roll_rate_limited,roll_rate_integral_norm,roll_attitude_gain,roll_rate_kp,roll_rate_ki,roll_rate_limit_rad_s,pitch_rate_command_rad_s,pitch_rate_error_rad_s,pitch_rate_limited,pitch_rate_integral_norm,pitch_attitude_gain,pitch_rate_kp,pitch_rate_ki,pitch_rate_limit_rad_s\n";
+               "cross_track_m,mission_leg,wind_north_m_s,wind_east_m_s,mission_phase,mission_target_distance_m,waypoint_type,roll_rate_command_rad_s,roll_rate_error_rad_s,roll_rate_limited,roll_rate_integral_norm,roll_attitude_gain,roll_rate_kp,roll_rate_ki,roll_rate_limit_rad_s,pitch_rate_command_rad_s,pitch_rate_error_rad_s,pitch_rate_limited,pitch_rate_integral_norm,pitch_attitude_gain,pitch_rate_kp,pitch_rate_ki,pitch_rate_limit_rad_s,yaw_control_active,yaw_rate_command_rad_s,yaw_rate_error_rad_s,yaw_rate_limited,yaw_airspeed_guarded,yaw_bank_limited,rudder_saturated,yaw_rate_integral_norm,pitch_coordination_ff_rad_s,sideslip_rad,lateral_specific_force_m_s2,yaw_enabled,yaw_rate_kp,yaw_rate_ki,rudder_limit_norm,rudder_sign,yaw_rate_limit_rad_s,yaw_min_airspeed_m_s,yaw_bank_limit_rad\n";
         csv << std::setprecision(10);
 
         const auto steps = static_cast<unsigned long long>(std::ceil(duration_s / dt_s));
@@ -406,6 +439,7 @@ int main(int argc, char** argv)
             if (mode == "manual" && time >= pulse_start_s && time < pulse_end_s) {
                 requested.aileron += static_cast<float>(pulse);
                 requested.elevator += static_cast<float>(elevator_pulse);
+                requested.rudder += static_cast<float>(rudder_pulse);
             }
             if (time >= 2.0 && time < 7.0) {
                 requested.throttle += static_cast<float>(throttle_pulse);
@@ -520,6 +554,17 @@ int main(int argc, char** argv)
                 << ',' << config.pitch.rate.kp
                 << ',' << config.pitch.rate.ki
                 << ',' << config.pitch.attitude.max_rate_rad_s
+                << ',' << result.yaw_control_active << ',' << result.yaw_rate_command_rad_s
+                << ',' << result.yaw_rate_error_rad_s << ',' << result.yaw_rate_limited
+                << ',' << result.yaw_airspeed_guarded << ',' << result.yaw_bank_limited
+                << ',' << result.rudder_saturated << ',' << controller.runtime.yaw.integral_norm
+                << ',' << result.pitch_coordination_ff_rad_s << ',' << aircraft.sideslip_rad()
+                << ',' << aircraft.lateral_specific_force_m_s2() << ',' << config.yaw.enabled
+                << ',' << config.yaw.rate.kp << ',' << config.yaw.rate.ki
+                << ',' << config.yaw.rate.max_rudder_norm << ',' << config.yaw.rate.rudder_sign
+                << ',' << config.yaw.coordination.max_rate_rad_s
+                << ',' << config.yaw.coordination.min_airspeed_m_s
+                << ',' << config.yaw.coordination.max_bank_rad
                 << '\n';
             if (telemetry_stdout && k % 10 == 0) {
                 const auto telemetry_nav = mission_mode ? nav : aircraft.navigation_state();

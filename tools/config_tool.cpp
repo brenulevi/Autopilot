@@ -23,7 +23,12 @@ std::vector<std::pair<const char*, float*>> fields(ap_aircraft_config_t& record)
         {"altitude_gain", &c.altitude.altitude_gain}, {"climb_rate_gain", &c.altitude.climb_rate_gain},
         {"max_pitch_offset_rad", &c.altitude.max_pitch_offset_rad}, {"l1_period_s", &record.l1_period_s},
         {"roll_rate_ki", &c.roll.rate.ki}, {"max_roll_rate_rad_s", &c.roll.attitude.max_rate_rad_s},
-        {"pitch_rate_ki", &c.pitch.rate.ki}, {"max_pitch_rate_rad_s", &c.pitch.attitude.max_rate_rad_s}};
+        {"pitch_rate_ki", &c.pitch.rate.ki}, {"max_pitch_rate_rad_s", &c.pitch.attitude.max_rate_rad_s},
+        {"yaw_rate_kp", &c.yaw.rate.kp}, {"yaw_rate_ki", &c.yaw.rate.ki},
+        {"max_rudder", &c.yaw.rate.max_rudder_norm}, {"rudder_sign", &c.yaw.rate.rudder_sign},
+        {"max_yaw_rate_rad_s", &c.yaw.coordination.max_rate_rad_s},
+        {"yaw_min_airspeed_m_s", &c.yaw.coordination.min_airspeed_m_s},
+        {"yaw_max_bank_rad", &c.yaw.coordination.max_bank_rad}};
 }
 
 void set_field(ap_aircraft_config_t& record, const std::string& assignment)
@@ -32,6 +37,11 @@ void set_field(ap_aircraft_config_t& record, const std::string& assignment)
     if (equal == std::string::npos) throw std::invalid_argument("Expected NAME=VALUE: " + assignment);
     const auto name = assignment.substr(0, equal);
     const auto value = assignment.substr(equal + 1);
+    if (name == "yaw_enabled") {
+        if (value != "0" && value != "1") throw std::invalid_argument("yaw_enabled must be 0 or 1");
+        record.control.yaw.enabled = value == "1";
+        return;
+    }
     for (auto field : fields(record)) {
         if (name != field.first) continue;
         std::size_t consumed = 0;
@@ -62,8 +72,9 @@ int main(int argc, char** argv)
         const std::string command = argv[1];
         if (command == "show" && argc == 3) {
             auto config = sim::load_config(argv[2]);
-            std::cout << "format=APCF encoder_version=2 encoder_bytes=96 sequence=" << config.sequence << '\n';
+            std::cout << "format=APCF encoder_version=3 encoder_bytes=128 sequence=" << config.sequence << '\n';
             std::cout << std::setprecision(std::numeric_limits<float>::max_digits10);
+            std::cout << "yaw_enabled=" << config.control.yaw.enabled << '\n';
             for (const auto field : fields(config)) std::cout << field.first << '=' << *field.second << '\n';
             return 0;
         }
@@ -85,7 +96,7 @@ int main(int argc, char** argv)
         }
         for (int i = first_assignment; i < argc; ++i) set_field(config, argv[i]);
         sim::save_config(output, config);
-        std::cout << "Saved 80-byte APCF configuration, sequence " << config.sequence
+        std::cout << "Saved 128-byte APCF v3 configuration, sequence " << config.sequence
                   << ": " << std::filesystem::absolute(output).string() << '\n';
         return 0;
     } catch (const std::exception& error) {

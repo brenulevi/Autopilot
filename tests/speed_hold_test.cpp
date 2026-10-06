@@ -34,7 +34,7 @@ void run_case(const char* root, double initial_kts, double step_m_s)
         check(!output.throttle_saturated, "Small speed step saturated throttle");
         check(output.controls.throttle >= 0.0f && output.controls.throttle <= 1.0f,
               "Throttle command out of range");
-        check(output.controls.rudder == trim.rudder, "Airspeed hold changed rudder");
+        check(output.yaw_control_active && !output.rudder_saturated, "Airspeed hold yaw control failed");
         const double error = std::abs(command - state.airspeed_m_s);
         if (time >= 20.0 && time < 30.0) hold_error = std::max(hold_error, error);
         if (time >= 50.0) return_error = std::max(return_error, error);

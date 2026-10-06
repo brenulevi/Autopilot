@@ -9,12 +9,13 @@
 extern "C" {
 #endif
 
-/* APCF v2: 12-byte header, 20 binary32 values, 4-byte CRC32; little endian.
- * Decoder also migrates v1 records with positive roll/pitch rate gains.
+/* APCF v3: 12-byte header, 28 binary32 values, 4-byte CRC32; little endian.
+ * Decoder also accepts v1/v2; legacy records disable yaw coordination.
  * See docs/configuration.md for the stable wire format. No raw struct storage.
  * Requires an IEEE-754 binary32 float target. No allocation or storage I/O. */
 #define AP_CONFIG_V1_RECORD_SIZE 80u
-#define AP_CONFIG_RECORD_SIZE 96u
+#define AP_CONFIG_V2_RECORD_SIZE 96u
+#define AP_CONFIG_RECORD_SIZE 128u
 
 typedef struct {
     ap_config_t control;

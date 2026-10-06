@@ -38,8 +38,8 @@ void run_case(const char* root, double speed_kts, double bank_deg, double pitch_
               "Small combined command saturated an actuator");
         check(!output.bank_command_limited && !output.pitch_command_limited,
               "Small combined command hit an attitude limit");
-        check(output.controls.rudder == trim.rudder && output.controls.throttle == trim.throttle,
-              "Combined hold changed rudder or throttle");
+        check(!output.rudder_saturated && output.yaw_control_active && output.controls.throttle == trim.throttle,
+              "Combined hold saturated rudder, disabled yaw, or changed throttle");
         const double bank_error_deg = std::abs(bank_command - state.roll_rad) / sim::radians_per_degree;
         const double pitch_error_deg = std::abs(pitch_command - state.pitch_rad) / sim::radians_per_degree;
         if (time >= 6.0 && time < 10.0) {

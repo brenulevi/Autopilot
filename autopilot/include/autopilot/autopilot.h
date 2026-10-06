@@ -7,6 +7,8 @@
 #include "autopilot/control/roll.h"
 #include "autopilot/control/pitch.h"
 #include "autopilot/control/airspeed.h"
+#include "autopilot/control/yaw_rate.h"
+#include "autopilot/control/turn_coordination.h"
 #include "autopilot/guidance/altitude.h"
 
 #ifdef __cplusplus
@@ -31,11 +33,18 @@ typedef struct {
 } ap_attitude_limits_t;
 
 typedef struct {
+    bool enabled; /* automatic coordination in combined attitude modes */
+    ap_yaw_rate_config_t rate;
+    ap_turn_coordination_config_t coordination;
+} ap_yaw_config_t;
+
+typedef struct {
     ap_roll_config_t roll;
     ap_pitch_config_t pitch;
     ap_airspeed_config_t airspeed;
     ap_altitude_config_t altitude;
     ap_attitude_limits_t attitude_limits;
+    ap_yaw_config_t yaw; /* zero-initialized/legacy configurations disable coordination */
 } ap_config_t;
 
 typedef struct {
@@ -54,6 +63,7 @@ typedef struct {
     ap_roll_rate_runtime_t roll;
     ap_pitch_rate_runtime_t pitch;
     ap_airspeed_runtime_t airspeed;
+    ap_yaw_rate_runtime_t yaw;
 } ap_runtime_t;
 
 /* Caller-owned controller instance. Configuration is copied at initialization;
@@ -84,11 +94,22 @@ typedef struct {
     float pitch_rate_error_rad_s;
     bool roll_rate_limited;
     bool pitch_rate_limited;
+    float yaw_rate_command_rad_s;
+    float yaw_rate_error_rad_s;
+    float pitch_coordination_ff_rad_s;
+    bool yaw_control_active;
+    bool yaw_rate_limited;
+    bool yaw_airspeed_guarded;
+    bool yaw_bank_limited;
+    bool rudder_saturated;
 } ap_output_t;
 
 /* Guidance limits attitude targets; attitude P loops produce limited body-rate
  * targets; roll/pitch PI rate loops produce signed actuator demands. These outer
- * loops use a near-level attitude/body-rate approximation without yaw coupling.
+ * loops use a near-level attitude/body-rate approximation. Enabled yaw adds a
+ * steady coordinated-turn r target and pitch-rate feedforward in combined modes.
+ * Manual/single-axis modes and disabled yaw clear yaw integral and pass rudder
+ * through its manual bounds. This is not heading hold or sideslip feedback.
  * Roll/pitch integrals persist while their axes are active; inactive axes reset.
  * Airspeed PI persists in airspeed/altitude modes and resets in other modes.
  * Manual mode clears all integrals and ignores config (which may be NULL).

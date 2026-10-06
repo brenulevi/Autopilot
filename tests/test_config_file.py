@@ -65,8 +65,9 @@ class ConfigFileTest(unittest.TestCase):
     def test_wire_format_and_edit(self):
         # Independent schema oracle; not a C encode/decode roundtrip.
         fields = [2, 2, math.radians(20), 1, 1.5, 4, math.radians(10), .5,
-                  .08, .005, 0, 1, .015, .05, math.radians(3), 4, 1, 1, 4, .5]
-        expected = struct.pack("<4sHHI20f", b"APCF", 2, 80, 0, *fields)
+                  .08, .005, 0, 1, .015, .05, math.radians(3), 4, 1, 1, 4, .5,
+                  1, 10, 10, .5, -1, .3, 25, math.radians(45)]
+        expected = struct.pack("<4sHHI28f", b"APCF", 3, 112, 0, *fields)
         expected += struct.pack("<I", zlib.crc32(expected))
         self.assertEqual(self.base.read_bytes(), expected)
         shown = self.run_command(TOOL, "show", self.base).stdout
@@ -74,7 +75,7 @@ class ConfigFileTest(unittest.TestCase):
         self.assertIn("roll_attitude_gain=2", shown)
         edited = self.work / "edited.apcf"
         self.run_command(TOOL, "set", self.base, edited, "roll_attitude_gain=1", "l1_period_s=8")
-        values = struct.unpack("<4sHHI20fI", edited.read_bytes())
+        values = struct.unpack("<4sHHI28fI", edited.read_bytes())
         self.assertEqual(values[3], 1)
         self.assertEqual(values[4], 1)
         self.assertEqual(values[19], 8)
@@ -87,8 +88,8 @@ class ConfigFileTest(unittest.TestCase):
 
     def test_bad_records_and_parameters(self):
         baseline = self.base.read_bytes()
-        corruptions = [baseline[:-1], baseline + b"x", bytes(96)]
-        for offset, replacement in [(4, b"\x03"), (6, b"\x00"),
+        corruptions = [baseline[:-1], baseline + b"x", bytes(128)]
+        for offset, replacement in [(4, b"\x04"), (6, b"\x00"),
                                     (12, struct.pack("<f", float("nan"))),
                                     (52, struct.pack("<f", 1.0))]:
             data = bytearray(baseline)
@@ -167,11 +168,12 @@ class ConfigFileTest(unittest.TestCase):
         self.assertIn("roll_attitude_gain=8", shown)
         self.assertIn("roll_rate_ki=0", shown)
         self.assertIn("max_roll_rate_rad_s=1", shown)
+        self.assertIn("yaw_enabled=0", shown)
         self.simulate("legacy_loaded", "--config", legacy)
         migrated = self.work / "migrated.apcf"
         self.run_command(TOOL, "set", legacy, migrated, "roll_rate_ki=0.1")
-        self.assertEqual(len(migrated.read_bytes()), 96)
-        self.assertEqual(struct.unpack_from("<H", migrated.read_bytes(), 4)[0], 2)
+        self.assertEqual(len(migrated.read_bytes()), 128)
+        self.assertEqual(struct.unpack_from("<H", migrated.read_bytes(), 4)[0], 3)
         self.assertEqual(legacy.read_bytes(), data)
         invalid = bytearray(data)
         struct.pack_into("<f", invalid, 16, 0.0)
@@ -181,6 +183,20 @@ class ConfigFileTest(unittest.TestCase):
         # Old normalized-angle units must never be accepted as new attitude gains.
         self.run_command(TOOL, "set", self.base, self.work / "old_names.apcf",
                          "roll_angle_gain=4", success=False)
+        # Independently construct v2 from its unchanged first twenty fields.
+        current = self.base.read_bytes()
+        v2 = struct.pack("<4sHHI", b"APCF", 2, 80, 7) + current[12:92]
+        v2 += struct.pack("<I", zlib.crc32(v2))
+        legacy_v2 = self.work / "legacy_v2.apcf"
+        legacy_v2.write_bytes(v2)
+        shown = self.run_command(TOOL, "show", legacy_v2).stdout
+        self.assertIn("yaw_enabled=0", shown)
+        self.assertIn("sequence=7", shown)
+        self.run_command(TOOL, "set", legacy_v2, self.work / "v2_migrated.apcf", "roll_rate_ki=0.2")
+        migrated_v2 = (self.work / "v2_migrated.apcf").read_bytes()
+        self.assertEqual(struct.unpack_from("<HHI", migrated_v2, 4), (3, 112, 8))
+        self.assertEqual(struct.unpack_from("<f", migrated_v2, 92)[0], 0)
+        self.assertEqual(legacy_v2.read_bytes(), v2)
 
     def test_explicit_rate_limits_and_telemetry(self):
         for axis in ("roll", "pitch"):
@@ -202,6 +218,56 @@ class ConfigFileTest(unittest.TestCase):
             for name, invalid in (("attitude-gain", "0"), ("rate-kp", "0"),
                                   ("rate-ki", "-1"), ("rate-limit-deg-s", "0")):
                 self.run_command(SIM, "--mode", f"{axis}-hold", f"--{axis}-{name}", invalid, success=False)
+        for flag, invalid in (("yaw-enabled", "2"), ("rudder-sign", "0"),
+                              ("yaw-rate-kp", "0"), ("yaw-rate-ki", "-1"),
+                              ("yaw-min-airspeed-m-s", "0"), ("yaw-bank-limit-deg", "90"),
+                              ("yaw-rate-limit-deg-s", "0"), ("rudder-limit", "2")):
+            self.run_command(SIM, f"--{flag}", invalid, success=False)
+        for value in ("yaw_enabled=0.5", "rudder_sign=0", "yaw_rate_kp=nan"):
+            self.run_command(TOOL, "set", self.base, self.work / "invalid_yaw.apcf", value, success=False)
+        # A CRC-valid record must still reject non-boolean wire values.
+        malformed = bytearray(self.base.read_bytes())
+        struct.pack_into("<f", malformed, 92, 0.5)
+        malformed[-4:] = struct.pack("<I", zlib.crc32(malformed[:-4]))
+        malformed_path = self.work / "bad_yaw_flag.apcf"
+        malformed_path.write_bytes(malformed)
+        self.run_command(TOOL, "show", malformed_path, success=False)
+        before = self.work / "yaw_before.csv"
+        after = self.work / "yaw_after.csv"
+        for path, options in ((before, ("--yaw-rate-ki", "0.2", "--config", self.base)),
+                              (after, ("--config", self.base, "--yaw-rate-ki", "0.2"))):
+            self.run_command(SIM, "--mode", "attitude-hold", "--duration", "3",
+                             "--yaw-min-airspeed-m-s", "100", "--yaw-rate-limit-deg-s", "0.01",
+                             "--output", path, *options)
+        self.assertEqual(before.read_bytes(), after.read_bytes())
+        with after.open() as stream:
+            row = list(csv.DictReader(stream))[-1]
+        self.assertEqual(row["yaw_control_active"], "1")
+        self.assertEqual(row["yaw_airspeed_guarded"], "1")
+        self.assertEqual(row["yaw_rate_limited"], "1")
+        self.assertAlmostEqual(float(row["yaw_rate_ki"]), 0.2, places=6)
+        for key in ("yaw_rate_command_rad_s", "yaw_rate_error_rad_s", "yaw_rate_integral_norm",
+                    "pitch_coordination_ff_rad_s", "sideslip_rad", "lateral_specific_force_m_s2"):
+            self.assertTrue(math.isfinite(float(row[key])), key)
+        disabled = self.work / "yaw_disabled.csv"
+        self.run_command(SIM, "--mode", "attitude-hold", "--duration", "3",
+                         "--yaw-enabled", "0", "--output", disabled)
+        with disabled.open() as stream:
+            row = list(csv.DictReader(stream))[-1]
+        self.assertEqual(row["yaw_control_active"], "0")
+        self.assertEqual(float(row["yaw_rate_integral_norm"]), 0)
+        pulse = self.work / "rudder_pulse.csv"
+        self.run_command(SIM, "--mode", "manual", "--duration", "2.6",
+                         "--rudder-pulse", "0.03", "--output", pulse)
+        with pulse.open() as stream:
+            rows = list(csv.DictReader(stream))
+        initial = rows[0]
+        during = next(row for row in rows if float(row["time_s"]) >= 2.1)
+        self.assertAlmostEqual(float(during["rudder_cmd_norm"]) - float(initial["rudder_cmd_norm"]), .03, places=6)
+        self.assertEqual(initial["rudder_cmd_norm"], rows[-1]["rudder_cmd_norm"])
+        self.assertTrue(all(row["aileron_cmd_norm"] == initial["aileron_cmd_norm"] for row in rows))
+        self.assertTrue(all(row["yaw_control_active"] == "0" for row in rows))
+        self.run_command(SIM, "--mode", "attitude-hold", "--rudder-pulse", "0.03", success=False)
 
 
 if __name__ == "__main__":

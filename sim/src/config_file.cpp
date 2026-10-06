@@ -11,8 +11,9 @@ ap_aircraft_config_t load_config(const std::filesystem::path& path)
     if (!file) throw std::runtime_error("Cannot open configuration: " + path.string());
     const auto length = file.tellg();
     if (length != static_cast<std::streamoff>(AP_CONFIG_RECORD_SIZE) &&
-        length != static_cast<std::streamoff>(AP_CONFIG_V1_RECORD_SIZE))
-        throw std::runtime_error("Configuration must be 96 bytes (v2) or 80 bytes (v1): " + path.string());
+        length != static_cast<std::streamoff>(AP_CONFIG_V1_RECORD_SIZE) &&
+        length != static_cast<std::streamoff>(AP_CONFIG_V2_RECORD_SIZE))
+        throw std::runtime_error("Configuration must be 128 bytes (v3), 96 bytes (v2), or 80 bytes (v1): " + path.string());
     std::array<uint8_t, AP_CONFIG_RECORD_SIZE> bytes{};
     file.seekg(0);
     file.read(reinterpret_cast<char*>(bytes.data()), length);

@@ -13,5 +13,6 @@ void ap_manual_bound(const ap_controls_t *requested, ap_output_t *result)
     result->controls.throttle = clamp(requested->throttle, 0.0f, 1.0f);
     result->aileron_saturated = result->controls.aileron != requested->aileron;
     result->elevator_saturated = result->controls.elevator != requested->elevator;
+    result->rudder_saturated = result->controls.rudder != requested->rudder;
     result->throttle_saturated = result->controls.throttle != requested->throttle;
 }

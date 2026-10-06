@@ -33,7 +33,8 @@ int main(void)
             .pitch = {{10.0f / 3.0f, 0.5f}, {3.0f, 0.5f, 0.5f}},
             .airspeed = {0.08f, 0.005f, 0.0f, 1.0f},
             .altitude = {0.015f, 0.05f, 0.052f},
-            .attitude_limits = {0.35f, 0.17f}
+            .attitude_limits = {0.35f, 0.17f},
+            .yaw = {true, {0.7f, 0.2f, 0.5f, 1.0f}, {0.3f, 25.0f, 0.785f}}
         },
         .l1_period_s = 4.0f,
         .sequence = 0x12345678u
@@ -43,16 +44,17 @@ int main(void)
     CHECK(ap_config_validate(&original));
     CHECK(ap_config_encode(&original, bytes, sizeof(bytes)));
     CHECK(bytes[AP_CONFIG_RECORD_SIZE] == 0xA5);
-    const uint8_t header[] = {'A','P','C','F',2,0,80,0,0x78,0x56,0x34,0x12};
+    const uint8_t header[] = {'A','P','C','F',3,0,112,0,0x78,0x56,0x34,0x12};
     CHECK(memcmp(bytes, header, sizeof(header)) == 0);
     CHECK(bytes[12] == 0 && bytes[13] == 0 && bytes[14] == 0 && bytes[15] == 0x41);
-    /* The APCF v2 order is independent of the nested structs: verify every wire field
+    /* The APCF v3 order is independent of the nested structs: verify every wire field
      * independently, so a symmetric encoder/decoder reorder cannot pass. */
-    const float expected_fields[20] = {
+    const float expected_fields[28] = {
         8.0f, 0.5f, 0.35f, 0.5f, 10.0f / 3.0f, 3.0f, 0.17f, 0.5f,
-        0.08f, 0.005f, 0.0f, 1.0f, 0.015f, 0.05f, 0.052f, 4.0f, 0.1f, 1.0f, 0.5f, 0.5f
+        0.08f, 0.005f, 0.0f, 1.0f, 0.015f, 0.05f, 0.052f, 4.0f, 0.1f, 1.0f, 0.5f, 0.5f,
+        1.0f, 0.7f, 0.2f, 0.5f, 1.0f, 0.3f, 25.0f, 0.785f
     };
-    for (unsigned field = 0; field < 20; ++field) {
+    for (unsigned field = 0; field < 28; ++field) {
         uint32_t bits;
         uint8_t expected_bytes[4];
         memcpy(&bits, &expected_fields[field], sizeof(bits));
@@ -95,8 +97,9 @@ int main(void)
         CHECK(!ap_config_decode(unsupported, AP_CONFIG_RECORD_SIZE, &decoded));
     }
     const uint32_t bad_values[] = {0x7FC00000u, 0x7F800000u, 0xFF800000u, 0xBF800000u};
-    for (unsigned field = 0; field < 20; ++field) {
+    for (unsigned field = 0; field < 28; ++field) {
         for (unsigned bad = 0; bad < 4; ++bad) {
+            if (field == 24 && bad == 3) continue; /* -1 is a valid actuator sign. */
             uint8_t invalid[AP_CONFIG_RECORD_SIZE];
             memcpy(invalid, bytes, AP_CONFIG_RECORD_SIZE);
             put_u32(invalid + 12 + 4 * field, bad_values[bad]);
@@ -128,6 +131,14 @@ int main(void)
     CHECK(memcmp(untouched, snapshot, sizeof(snapshot)) == 0);
     CHECK(!ap_config_validate(NULL));
 
+    uint8_t v2[AP_CONFIG_V2_RECORD_SIZE] = {'A','P','C','F',2,0,80,0};
+    memcpy(v2 + 12, bytes + 12, 80);
+    put_u32(v2 + 92, flight_crc32(v2, 92));
+    CHECK(ap_config_decode(v2, sizeof(v2), &decoded));
+    CHECK(!decoded.control.yaw.enabled);
+    CHECK(decoded.control.roll.rate.ki == original.control.roll.rate.ki);
+    CHECK(decoded.control.pitch.rate.kp == original.control.pitch.rate.kp);
+
     /* Independent original-v1 record: convert gain units, supply rate limits,
      * leave integral action disabled, and never modify the input bytes. */
     uint8_t legacy[AP_CONFIG_V1_RECORD_SIZE] = {'A','P','C','F',1,0,64,0};
@@ -145,6 +156,7 @@ int main(void)
     memcpy(legacy_snapshot, legacy, sizeof(legacy));
     CHECK(ap_config_decode(legacy, sizeof(legacy), &decoded));
     CHECK(decoded.control.roll.attitude.gain == 8.0f);
+    CHECK(!decoded.control.yaw.enabled);
     CHECK(decoded.control.pitch.attitude.gain == 10.0f / 3.0f);
     CHECK(decoded.control.roll.rate.kp == 0.5f && decoded.control.pitch.rate.kp == 3.0f);
     CHECK(decoded.control.roll.rate.ki == 0.0f && decoded.control.pitch.rate.ki == 0.0f);

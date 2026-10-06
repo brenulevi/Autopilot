@@ -73,6 +73,8 @@ if (ap_controller_step(&controller, &input, &output)) {
 
 The simulator uses this instance API. `ap_step(config, input, runtime, output)`
 remains available for callers that manage configuration and runtime separately;
-it validates the settings required by the selected mode. APCF v2 stores cascade gains and rate limits explicitly. The decoder migrates
-compatible v1 records rather than reinterpreting old gain units. See
-[the cascade guide](cascaded_control.md) and [configuration](configuration.md).
+it validates the settings required by the selected mode. APCF v3 stores cascade
+gains, rate limits, and coordinated yaw settings explicitly. The decoder migrates
+compatible v1 records rather than reinterpreting old gain units. V1/v2 profiles
+retain yaw passthrough until explicitly enabled. See [the cascade guide](cascaded_control.md),
+[yaw control](yaw_control.md), and [configuration](configuration.md).

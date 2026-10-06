@@ -23,7 +23,7 @@ static void write_u32(uint8_t *p, uint32_t value)
 
 
 /* Explicit order is the wire schema; never walk struct memory as an array. */
-static void to_fields(const ap_aircraft_config_t *record, float fields[20])
+static void to_fields(const ap_aircraft_config_t *record, float fields[28])
 {
     const ap_config_t *c = &record->control;
     fields[0] = c->roll.attitude.gain;
@@ -46,15 +46,23 @@ static void to_fields(const ap_aircraft_config_t *record, float fields[20])
     fields[17] = c->roll.attitude.max_rate_rad_s;
     fields[18] = c->pitch.rate.ki;
     fields[19] = c->pitch.attitude.max_rate_rad_s;
+    fields[20] = c->yaw.enabled ? 1.0f : 0.0f;
+    fields[21] = c->yaw.rate.kp;
+    fields[22] = c->yaw.rate.ki;
+    fields[23] = c->yaw.rate.max_rudder_norm;
+    fields[24] = c->yaw.rate.rudder_sign;
+    fields[25] = c->yaw.coordination.max_rate_rad_s;
+    fields[26] = c->yaw.coordination.min_airspeed_m_s;
+    fields[27] = c->yaw.coordination.max_bank_rad;
 }
 
 bool ap_control_config_validate(const ap_config_t *config)
 {
     if (config == NULL) return false;
     const ap_aircraft_config_t record = {.control = *config};
-    float fields[20];
+    float fields[28];
     to_fields(&record, fields);
-    for (unsigned i = 0; i < 20; ++i)
+    for (unsigned i = 0; i < 28; ++i)
         if (i != 15 && !isfinite(fields[i])) return false;
     const ap_config_t *c = config;
     const float half_pi = 1.570796327f;
@@ -70,7 +78,13 @@ bool ap_control_config_validate(const ap_config_t *config)
            c->airspeed.min_throttle_norm >= 0.0f && c->airspeed.min_throttle_norm < 1.0f &&
            c->airspeed.max_throttle_norm > c->airspeed.min_throttle_norm && c->airspeed.max_throttle_norm <= 1.0f &&
            c->altitude.altitude_gain > 0.0f && c->altitude.climb_rate_gain >= 0.0f &&
-           c->altitude.max_pitch_offset_rad > 0.0f && c->altitude.max_pitch_offset_rad < half_pi;
+           c->altitude.max_pitch_offset_rad > 0.0f && c->altitude.max_pitch_offset_rad < half_pi &&
+           (!c->yaw.enabled ||
+            (c->yaw.rate.kp > 0.0f && c->yaw.rate.ki >= 0.0f &&
+             c->yaw.rate.max_rudder_norm > 0.0f && c->yaw.rate.max_rudder_norm <= 1.0f &&
+             (c->yaw.rate.rudder_sign == 1.0f || c->yaw.rate.rudder_sign == -1.0f) &&
+             c->yaw.coordination.max_rate_rad_s > 0.0f && c->yaw.coordination.min_airspeed_m_s > 0.0f &&
+             c->yaw.coordination.max_bank_rad > 0.0f && c->yaw.coordination.max_bank_rad < half_pi));
 }
 
 bool ap_config_validate(const ap_aircraft_config_t *record)
@@ -84,11 +98,11 @@ bool ap_config_encode(const ap_aircraft_config_t *config, uint8_t *bytes, size_t
 {
     if (bytes == NULL || capacity < AP_CONFIG_RECORD_SIZE || !ap_config_validate(config))
         return false;
-    uint8_t encoded[AP_CONFIG_RECORD_SIZE] = {'A', 'P', 'C', 'F', 2, 0, 80, 0};
+    uint8_t encoded[AP_CONFIG_RECORD_SIZE] = {'A', 'P', 'C', 'F', 3, 0, 112, 0};
     write_u32(encoded + 8, config->sequence);
-    float fields[20];
+    float fields[28];
     to_fields(config, fields);
-    for (unsigned i = 0; i < 20; ++i) {
+    for (unsigned i = 0; i < 28; ++i) {
         uint32_t bits;
         memcpy(&bits, &fields[i], sizeof(bits));
         write_u32(encoded + 12 + 4 * i, bits);
@@ -101,13 +115,16 @@ bool ap_config_encode(const ap_aircraft_config_t *config, uint8_t *bytes, size_t
 bool ap_config_decode(const uint8_t *bytes, size_t length, ap_aircraft_config_t *config)
 {
     if (bytes == NULL || config == NULL ||
-        (length != AP_CONFIG_V1_RECORD_SIZE && length != AP_CONFIG_RECORD_SIZE)) return false;
+        (length != AP_CONFIG_V1_RECORD_SIZE && length != AP_CONFIG_V2_RECORD_SIZE &&
+         length != AP_CONFIG_RECORD_SIZE)) return false;
     const bool legacy = length == AP_CONFIG_V1_RECORD_SIZE;
-    if (memcmp(bytes, "APCF", 4) != 0 || bytes[4] != (legacy ? 1 : 2) || bytes[5] != 0 ||
-        bytes[6] != (legacy ? 64 : 80) || bytes[7] != 0 ||
+    const unsigned version = legacy ? 1u : (length == AP_CONFIG_V2_RECORD_SIZE ? 2u : 3u);
+    const unsigned count = version == 1u ? 16u : (version == 2u ? 20u : 28u);
+    if (memcmp(bytes, "APCF", 4) != 0 || bytes[4] != version || bytes[5] != 0 ||
+        bytes[6] != count * 4u || bytes[7] != 0 ||
         read_u32(bytes + length - 4) != flight_crc32(bytes, length - 4)) return false;
-    float f[20] = {0};
-    for (unsigned i = 0; i < (legacy ? 16u : 20u); ++i) {
+    float f[28] = {0};
+    for (unsigned i = 0; i < count; ++i) {
         const uint32_t bits = read_u32(bytes + 12 + 4 * i);
         memcpy(&f[i], &bits, sizeof(bits));
     }
@@ -121,13 +138,15 @@ bool ap_config_decode(const uint8_t *bytes, size_t length, ap_aircraft_config_t 
         f[17] = 1.0f;
         f[19] = 0.5f;
     }
+    if (f[20] != 0.0f && f[20] != 1.0f) return false;
     ap_aircraft_config_t next = {
         .control = {
             .roll = {{f[0], f[17]}, {f[1], f[16], f[3]}},
             .pitch = {{f[4], f[19]}, {f[5], f[18], f[7]}},
             .airspeed = {f[8], f[9], f[10], f[11]},
             .altitude = {f[12], f[13], f[14]},
-            .attitude_limits = {f[2], f[6]}
+            .attitude_limits = {f[2], f[6]},
+            .yaw = {f[20] == 1.0f, {f[21], f[22], f[23], f[24]}, {f[25], f[26], f[27]}}
         },
         .l1_period_s = f[15],
         .sequence = read_u32(bytes + 8)
