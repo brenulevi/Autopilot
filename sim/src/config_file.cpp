@@ -9,13 +9,15 @@ ap_aircraft_config_t load_config(const std::filesystem::path& path)
 {
     std::ifstream file(path, std::ios::binary | std::ios::ate);
     if (!file) throw std::runtime_error("Cannot open configuration: " + path.string());
-    if (file.tellg() != static_cast<std::streamoff>(AP_CONFIG_RECORD_SIZE))
-        throw std::runtime_error("Configuration must be exactly 80 bytes: " + path.string());
+    const auto length = file.tellg();
+    if (length != static_cast<std::streamoff>(AP_CONFIG_RECORD_SIZE) &&
+        length != static_cast<std::streamoff>(AP_CONFIG_V1_RECORD_SIZE))
+        throw std::runtime_error("Configuration must be 96 bytes (v2) or 80 bytes (v1): " + path.string());
     std::array<uint8_t, AP_CONFIG_RECORD_SIZE> bytes{};
     file.seekg(0);
-    file.read(reinterpret_cast<char*>(bytes.data()), bytes.size());
+    file.read(reinterpret_cast<char*>(bytes.data()), length);
     ap_aircraft_config_t config{};
-    if (!file || !ap_config_decode(bytes.data(), bytes.size(), &config))
+    if (!file || !ap_config_decode(bytes.data(), static_cast<std::size_t>(length), &config))
         throw std::runtime_error("Invalid configuration format, version, CRC, or parameter bounds: " + path.string());
     return config;
 }

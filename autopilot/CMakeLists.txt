@@ -4,8 +4,10 @@ add_library(autopilot STATIC
     src/mission/mission.c
     src/mission/path.c
     src/control/manual.c
-    src/control/roll.c
-    src/control/pitch.c
+    src/control/roll_attitude.c
+    src/control/roll_rate.c
+    src/control/pitch_attitude.c
+    src/control/pitch_rate.c
     src/control/airspeed.c
     src/guidance/bank_limit.c
     src/guidance/pitch_limit.c

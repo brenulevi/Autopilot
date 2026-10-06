@@ -14,14 +14,16 @@ namespace {
 std::vector<std::pair<const char*, float*>> fields(ap_aircraft_config_t& record)
 {
     auto& c = record.control;
-    return {{"roll_angle_gain", &c.roll_angle_gain}, {"roll_rate_gain", &c.roll_rate_gain},
-        {"max_bank_rad", &c.max_bank_rad}, {"max_aileron", &c.max_aileron},
-        {"pitch_angle_gain", &c.pitch_angle_gain}, {"pitch_rate_gain", &c.pitch_rate_gain},
-        {"max_pitch_rad", &c.max_pitch_rad}, {"max_elevator", &c.max_elevator},
-        {"airspeed_kp", &c.airspeed_kp}, {"airspeed_ki", &c.airspeed_ki},
-        {"min_throttle", &c.min_throttle}, {"max_throttle", &c.max_throttle},
-        {"altitude_gain", &c.altitude_gain}, {"climb_rate_gain", &c.climb_rate_gain},
-        {"max_pitch_offset_rad", &c.max_pitch_offset_rad}, {"l1_period_s", &record.l1_period_s}};
+    return {{"roll_attitude_gain", &c.roll.attitude.gain}, {"roll_rate_kp", &c.roll.rate.kp},
+        {"max_bank_rad", &c.attitude_limits.max_bank_rad}, {"max_aileron", &c.roll.rate.max_aileron_norm},
+        {"pitch_attitude_gain", &c.pitch.attitude.gain}, {"pitch_rate_kp", &c.pitch.rate.kp},
+        {"max_pitch_rad", &c.attitude_limits.max_pitch_rad}, {"max_elevator", &c.pitch.rate.max_elevator_norm},
+        {"airspeed_kp", &c.airspeed.kp}, {"airspeed_ki", &c.airspeed.ki},
+        {"min_throttle", &c.airspeed.min_throttle_norm}, {"max_throttle", &c.airspeed.max_throttle_norm},
+        {"altitude_gain", &c.altitude.altitude_gain}, {"climb_rate_gain", &c.altitude.climb_rate_gain},
+        {"max_pitch_offset_rad", &c.altitude.max_pitch_offset_rad}, {"l1_period_s", &record.l1_period_s},
+        {"roll_rate_ki", &c.roll.rate.ki}, {"max_roll_rate_rad_s", &c.roll.attitude.max_rate_rad_s},
+        {"pitch_rate_ki", &c.pitch.rate.ki}, {"max_pitch_rate_rad_s", &c.pitch.attitude.max_rate_rad_s}};
 }
 
 void set_field(ap_aircraft_config_t& record, const std::string& assignment)
@@ -60,7 +62,7 @@ int main(int argc, char** argv)
         const std::string command = argv[1];
         if (command == "show" && argc == 3) {
             auto config = sim::load_config(argv[2]);
-            std::cout << "format=APCF version=1 bytes=80 sequence=" << config.sequence << '\n';
+            std::cout << "format=APCF encoder_version=2 encoder_bytes=96 sequence=" << config.sequence << '\n';
             std::cout << std::setprecision(std::numeric_limits<float>::max_digits10);
             for (const auto field : fields(config)) std::cout << field.first << '=' << *field.second << '\n';
             return 0;

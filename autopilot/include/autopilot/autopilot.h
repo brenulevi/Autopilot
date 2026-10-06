@@ -4,6 +4,10 @@
 #include <stdbool.h>
 #include "autopilot/control/actuators.h"
 #include "autopilot/estimation/state.h"
+#include "autopilot/control/roll.h"
+#include "autopilot/control/pitch.h"
+#include "autopilot/control/airspeed.h"
+#include "autopilot/guidance/altitude.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -22,21 +26,16 @@ typedef enum {
  * Positive roll gains assume positive aileron produces positive body roll rate.
  * Pitch gains assume negative elevator produces positive body pitch rate. */
 typedef struct {
-    float roll_angle_gain; /* normalized command / rad, strictly positive */
-    float roll_rate_gain;  /* normalized command / (rad/s), nonnegative */
-    float max_bank_rad;    /* command limit, (0, pi/2) */
-    float max_aileron;     /* absolute normalized command limit, (0, 1] */
-    float pitch_angle_gain; /* normalized elevator / rad, strictly positive */
-    float pitch_rate_gain;  /* normalized elevator / (rad/s), nonnegative */
-    float max_pitch_rad;    /* absolute pitch command limit, (0, pi/2) */
-    float max_elevator;     /* absolute normalized command limit, (0, 1] */
-    float airspeed_kp;      /* normalized throttle / (m/s), nonnegative */
-    float airspeed_ki;      /* normalized throttle / (m/s*s), strictly positive */
-    float min_throttle;     /* normalized lower limit, [0, 1) */
-    float max_throttle;     /* normalized upper limit, (min_throttle, 1] */
-    float altitude_gain;     /* pitch-command rad / m, strictly positive */
-    float climb_rate_gain;   /* pitch-command rad / (m/s), nonnegative */
-    float max_pitch_offset_rad; /* altitude-loop offset limit, (0, pi/2) */
+    float max_bank_rad; /* command limit, (0, pi/2) */
+    float max_pitch_rad; /* command limit, (0, pi/2) */
+} ap_attitude_limits_t;
+
+typedef struct {
+    ap_roll_config_t roll;
+    ap_pitch_config_t pitch;
+    ap_airspeed_config_t airspeed;
+    ap_altitude_config_t altitude;
+    ap_attitude_limits_t attitude_limits;
 } ap_config_t;
 
 typedef struct {
@@ -52,8 +51,18 @@ typedef struct {
 
 /* Caller-owned PI state. Initialize to {0}; reused on successive steps. */
 typedef struct {
-    float airspeed_integral_norm;
+    ap_roll_rate_runtime_t roll;
+    ap_pitch_rate_runtime_t pitch;
+    ap_airspeed_runtime_t airspeed;
 } ap_runtime_t;
+
+/* Caller-owned controller instance. Configuration is copied at initialization;
+ * runtime is retained across ticks. Use the functions below to initialize/update.
+ * Public storage enables static/stack allocation; fields are not opaque. */
+typedef struct {
+    ap_config_t config;
+    ap_runtime_t runtime;
+} ap_controller_t;
 
 typedef struct {
     ap_controls_t controls;
@@ -69,26 +78,37 @@ typedef struct {
     float altitude_command_m;
     float altitude_error_m;
     bool altitude_pitch_limited;
+    float roll_rate_command_rad_s;
+    float pitch_rate_command_rad_s;
+    float roll_rate_error_rad_s;
+    float pitch_rate_error_rad_s;
+    bool roll_rate_limited;
+    bool pitch_rate_limited;
 } ap_output_t;
 
-/* Main control entry point for every mode. The caller owns runtime and keeps it
- * across successive ticks. Manual, roll, pitch, and attitude modes do not use
- * persistent state; they clear the airspeed integral. Airspeed and altitude
- * modes use the same entry point and update the airspeed PI state.
- * aileron = trim + angle_gain * (bank_command - roll) - rate_gain * p.
- * This is PD-like, not a PID: there is no integral state. Body p is not
- * identical to the derivative of Euler bank except near simple attitudes.
- * Pitch assumes negative elevator command produces positive pitch acceleration:
- * elevator = trim - angle_gain * (pitch_command - pitch) + rate_gain * q.
- * Verify that sign on each aircraft before using pitch hold.
- * dt_s is validated for the interface but not used by the algebraic attitude
- * laws. config is required in closed-loop modes and ignored (may be NULL) in
- * manual mode. runtime must be zero-initialized before the first call and
- * remains caller-owned. No allocation, OS, simulator, or peripheral dependencies.
- * Returns false on invalid input and leaves output unchanged. The caller
- * must handle failure; this API does not define an aircraft failsafe. */
+/* Guidance limits attitude targets; attitude P loops produce limited body-rate
+ * targets; roll/pitch PI rate loops produce signed actuator demands. These outer
+ * loops use a near-level attitude/body-rate approximation without yaw coupling.
+ * Roll/pitch integrals persist while their axes are active; inactive axes reset.
+ * Airspeed PI persists in airspeed/altitude modes and resets in other modes.
+ * Manual mode clears all integrals and ignores config (which may be NULL).
+ * dt_s must be positive and finite. Zero-initialize caller-owned runtime before
+ * the first call. No allocation, OS, simulator, or peripheral dependencies.
+ * Failure leaves runtime and output unchanged; caller defines the failsafe. */
 bool ap_step(const ap_config_t *config, const ap_input_t *input,
              ap_runtime_t *runtime, ap_output_t *output);
+
+/* Checks all control settings, independently of storage/navigation metadata. */
+bool ap_control_config_validate(const ap_config_t *config);
+
+/* Copies configuration and clears runtime. Full configuration must be valid;
+ * failure leaves controller unchanged. No allocation or I/O. */
+bool ap_controller_init(ap_controller_t *controller, const ap_config_t *config);
+
+/* Instance entry point; same modes and transactional failure behavior as ap_step.
+ * Configuration remains unchanged; runtime is updated only on success. */
+bool ap_controller_step(ap_controller_t *controller, const ap_input_t *input,
+                        ap_output_t *output);
 
 #ifdef __cplusplus
 }

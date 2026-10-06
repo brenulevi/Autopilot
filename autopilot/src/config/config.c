@@ -23,47 +23,60 @@ static void write_u32(uint8_t *p, uint32_t value)
 
 
 /* Explicit order is the wire schema; never walk struct memory as an array. */
-static void to_fields(const ap_aircraft_config_t *record, float fields[16])
+static void to_fields(const ap_aircraft_config_t *record, float fields[20])
 {
     const ap_config_t *c = &record->control;
-    fields[0] = c->roll_angle_gain;
-    fields[1] = c->roll_rate_gain;
-    fields[2] = c->max_bank_rad;
-    fields[3] = c->max_aileron;
-    fields[4] = c->pitch_angle_gain;
-    fields[5] = c->pitch_rate_gain;
-    fields[6] = c->max_pitch_rad;
-    fields[7] = c->max_elevator;
-    fields[8] = c->airspeed_kp;
-    fields[9] = c->airspeed_ki;
-    fields[10] = c->min_throttle;
-    fields[11] = c->max_throttle;
-    fields[12] = c->altitude_gain;
-    fields[13] = c->climb_rate_gain;
-    fields[14] = c->max_pitch_offset_rad;
+    fields[0] = c->roll.attitude.gain;
+    fields[1] = c->roll.rate.kp;
+    fields[2] = c->attitude_limits.max_bank_rad;
+    fields[3] = c->roll.rate.max_aileron_norm;
+    fields[4] = c->pitch.attitude.gain;
+    fields[5] = c->pitch.rate.kp;
+    fields[6] = c->attitude_limits.max_pitch_rad;
+    fields[7] = c->pitch.rate.max_elevator_norm;
+    fields[8] = c->airspeed.kp;
+    fields[9] = c->airspeed.ki;
+    fields[10] = c->airspeed.min_throttle_norm;
+    fields[11] = c->airspeed.max_throttle_norm;
+    fields[12] = c->altitude.altitude_gain;
+    fields[13] = c->altitude.climb_rate_gain;
+    fields[14] = c->altitude.max_pitch_offset_rad;
     fields[15] = record->l1_period_s;
+    fields[16] = c->roll.rate.ki;
+    fields[17] = c->roll.attitude.max_rate_rad_s;
+    fields[18] = c->pitch.rate.ki;
+    fields[19] = c->pitch.attitude.max_rate_rad_s;
+}
+
+bool ap_control_config_validate(const ap_config_t *config)
+{
+    if (config == NULL) return false;
+    const ap_aircraft_config_t record = {.control = *config};
+    float fields[20];
+    to_fields(&record, fields);
+    for (unsigned i = 0; i < 20; ++i)
+        if (i != 15 && !isfinite(fields[i])) return false;
+    const ap_config_t *c = config;
+    const float half_pi = 1.570796327f;
+    return c->roll.attitude.gain > 0.0f && c->roll.rate.kp > 0.0f && c->roll.rate.ki >= 0.0f &&
+           c->roll.attitude.max_rate_rad_s > 0.0f &&
+           c->attitude_limits.max_bank_rad > 0.0f && c->attitude_limits.max_bank_rad < half_pi &&
+           c->roll.rate.max_aileron_norm > 0.0f && c->roll.rate.max_aileron_norm <= 1.0f &&
+           c->pitch.attitude.gain > 0.0f && c->pitch.rate.kp > 0.0f && c->pitch.rate.ki >= 0.0f &&
+           c->pitch.attitude.max_rate_rad_s > 0.0f &&
+           c->attitude_limits.max_pitch_rad > 0.0f && c->attitude_limits.max_pitch_rad < half_pi &&
+           c->pitch.rate.max_elevator_norm > 0.0f && c->pitch.rate.max_elevator_norm <= 1.0f &&
+           c->airspeed.kp >= 0.0f && c->airspeed.ki > 0.0f &&
+           c->airspeed.min_throttle_norm >= 0.0f && c->airspeed.min_throttle_norm < 1.0f &&
+           c->airspeed.max_throttle_norm > c->airspeed.min_throttle_norm && c->airspeed.max_throttle_norm <= 1.0f &&
+           c->altitude.altitude_gain > 0.0f && c->altitude.climb_rate_gain >= 0.0f &&
+           c->altitude.max_pitch_offset_rad > 0.0f && c->altitude.max_pitch_offset_rad < half_pi;
 }
 
 bool ap_config_validate(const ap_aircraft_config_t *record)
 {
-    if (record == NULL) return false;
-    float fields[16];
-    to_fields(record, fields);
-    for (unsigned i = 0; i < 16; ++i)
-        if (!isfinite(fields[i])) return false;
-    const ap_config_t *c = &record->control;
-    const float half_pi = 1.570796327f;
-    return c->roll_angle_gain > 0.0f && c->roll_rate_gain >= 0.0f &&
-           c->max_bank_rad > 0.0f && c->max_bank_rad < half_pi &&
-           c->max_aileron > 0.0f && c->max_aileron <= 1.0f &&
-           c->pitch_angle_gain > 0.0f && c->pitch_rate_gain >= 0.0f &&
-           c->max_pitch_rad > 0.0f && c->max_pitch_rad < half_pi &&
-           c->max_elevator > 0.0f && c->max_elevator <= 1.0f &&
-           c->airspeed_kp >= 0.0f && c->airspeed_ki > 0.0f &&
-           c->min_throttle >= 0.0f && c->min_throttle < 1.0f &&
-           c->max_throttle > c->min_throttle && c->max_throttle <= 1.0f &&
-           c->altitude_gain > 0.0f && c->climb_rate_gain >= 0.0f &&
-           c->max_pitch_offset_rad > 0.0f && c->max_pitch_offset_rad < half_pi &&
+    return record != NULL && ap_control_config_validate(&record->control) &&
+           isfinite(record->l1_period_s) &&
            record->l1_period_s >= 1.0f && record->l1_period_s <= 30.0f;
 }
 
@@ -71,35 +84,53 @@ bool ap_config_encode(const ap_aircraft_config_t *config, uint8_t *bytes, size_t
 {
     if (bytes == NULL || capacity < AP_CONFIG_RECORD_SIZE || !ap_config_validate(config))
         return false;
-    uint8_t encoded[AP_CONFIG_RECORD_SIZE] = {'A', 'P', 'C', 'F', 1, 0, 64, 0};
+    uint8_t encoded[AP_CONFIG_RECORD_SIZE] = {'A', 'P', 'C', 'F', 2, 0, 80, 0};
     write_u32(encoded + 8, config->sequence);
-    float fields[16];
+    float fields[20];
     to_fields(config, fields);
-    for (unsigned i = 0; i < 16; ++i) {
+    for (unsigned i = 0; i < 20; ++i) {
         uint32_t bits;
         memcpy(&bits, &fields[i], sizeof(bits));
         write_u32(encoded + 12 + 4 * i, bits);
     }
-    write_u32(encoded + 76, flight_crc32(encoded, 76));
+    write_u32(encoded + AP_CONFIG_RECORD_SIZE - 4, flight_crc32(encoded, AP_CONFIG_RECORD_SIZE - 4));
     memcpy(bytes, encoded, sizeof(encoded));
     return true;
 }
 
 bool ap_config_decode(const uint8_t *bytes, size_t length, ap_aircraft_config_t *config)
 {
-    if (bytes == NULL || config == NULL || length != AP_CONFIG_RECORD_SIZE ||
-        memcmp(bytes, "APCF", 4) != 0 || bytes[4] != 1 || bytes[5] != 0 ||
-        bytes[6] != 64 || bytes[7] != 0 || read_u32(bytes + 76) != flight_crc32(bytes, 76))
-        return false;
-    float f[16];
-    for (unsigned i = 0; i < 16; ++i) {
+    if (bytes == NULL || config == NULL ||
+        (length != AP_CONFIG_V1_RECORD_SIZE && length != AP_CONFIG_RECORD_SIZE)) return false;
+    const bool legacy = length == AP_CONFIG_V1_RECORD_SIZE;
+    if (memcmp(bytes, "APCF", 4) != 0 || bytes[4] != (legacy ? 1 : 2) || bytes[5] != 0 ||
+        bytes[6] != (legacy ? 64 : 80) || bytes[7] != 0 ||
+        read_u32(bytes + length - 4) != flight_crc32(bytes, length - 4)) return false;
+    float f[20] = {0};
+    for (unsigned i = 0; i < (legacy ? 16u : 20u); ++i) {
         const uint32_t bits = read_u32(bytes + 12 + 4 * i);
         memcpy(&f[i], &bits, sizeof(bits));
     }
+    if (legacy) {
+        /* A = K_rate * K_attitude. Old damping must be positive to define
+         * a controllable rate loop. Legacy records start without integral action
+         * and acquire explicit 1 rad/s roll and 0.5 rad/s pitch target limits. */
+        if (!isfinite(f[1]) || f[1] <= 0.0f || !isfinite(f[5]) || f[5] <= 0.0f) return false;
+        f[0] /= f[1];
+        f[4] /= f[5];
+        f[17] = 1.0f;
+        f[19] = 0.5f;
+    }
     ap_aircraft_config_t next = {
-        {f[0], f[1], f[2], f[3], f[4], f[5], f[6], f[7],
-         f[8], f[9], f[10], f[11], f[12], f[13], f[14]},
-        f[15], read_u32(bytes + 8)
+        .control = {
+            .roll = {{f[0], f[17]}, {f[1], f[16], f[3]}},
+            .pitch = {{f[4], f[19]}, {f[5], f[18], f[7]}},
+            .airspeed = {f[8], f[9], f[10], f[11]},
+            .altitude = {f[12], f[13], f[14]},
+            .attitude_limits = {f[2], f[6]}
+        },
+        .l1_period_s = f[15],
+        .sequence = read_u32(bytes + 8)
     };
     if (!ap_config_validate(&next)) return false;
     *config = next;

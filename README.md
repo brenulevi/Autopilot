@@ -36,8 +36,10 @@ autopilot/                 C library; no JSBSim, OS, heap, or board dependencies
   src/autopilot/step.c    Input validation and mode dispatch
   src/config/config.c     APCF configuration codec
   src/control/manual.c    Bounds manual commands and untouched control axes
-  src/control/roll.c      Bank-error and body-roll-rate feedback
-  src/control/pitch.c     Pitch-error and body-pitch-rate feedback
+  src/control/roll_attitude.c  Limited bank-error to body-rate targets
+  src/control/roll_rate.c      Stateful body-roll-rate PI
+  src/control/pitch_attitude.c Limited pitch-error to body-rate targets
+  src/control/pitch_rate.c     Stateful body-pitch-rate PI
   src/control/airspeed.c  Throttle PI with conditional anti-windup
   src/guidance/bank_limit.c  Limits the requested bank angle
   src/guidance/pitch_limit.c Limits the requested pitch angle
@@ -78,9 +80,16 @@ Each simulation tick reads JSBSim state, calls the C autopilot, applies the
 returned commands through the adapter, and advances the aircraft by 0.01 seconds.
 The loop normally runs as fast as the computer allows. `--flightgear` sends
 aircraft state over localhost UDP and paces the simulation in real time.
-`ap_step()` is the single control entry point; it receives caller-owned runtime
-state for the throttle PI when a speed or altitude mode uses it. The control and guidance
-modules have private headers and can evolve without changing callers. The
+`ap_controller_step()` is the instance entry point: initialize a caller-owned
+`ap_controller_t` with `ap_controller_init()` to copy configuration and clear PI
+state. Controller configuration is grouped by responsibility (`.roll`, `.pitch`,
+`.airspeed`, `.altitude`, `.attitude_limits`); each internal controller receives
+only its own measurements and settings. See [data ownership](docs/architecture.md#data-ownership-and-composition).
+
+`ap_step()` remains the control entry point for separately owned configuration
+and runtime; it receives caller-owned runtime
+state for the active roll, pitch, and throttle PI loops. Public controller-specific
+headers expose only the measurements, settings, and results each module needs. The
 `estimation/state.h` file defines the state passed into control; it does not
 implement an estimator yet. JSBSim currently fills that structure with exact
 simulated state. When sensors are added, the estimator can populate the same
@@ -162,13 +171,14 @@ The command above does not yet build a flashable MCU application.
 
 ## First experiment
 
-Aircraft control/guidance settings can now be loaded from an **80-byte binary
-APCF file**, with version, sequence number, and CRC32. The C codec is portable
+Aircraft control/guidance settings can now be saved in a **96-byte binary
+APCF v2 file**, with version, sequence number, and CRC32. Supported 80-byte v1
+files are converted when loaded. The C codec is portable
 to future EEPROM storage; the host tool reads/writes files without JSON.
 
 ```powershell
 ./build/host/bin/Debug/autopilot_config.exe show configs/c172x.apcf
-./build/host/bin/Debug/autopilot_config.exe set configs/c172x.apcf logs/c172x_tuned.apcf roll_angle_gain=3 roll_rate_gain=0.6
+./build/host/bin/Debug/autopilot_config.exe set configs/c172x.apcf logs/c172x_tuned.apcf roll_attitude_gain=2 roll_rate_kp=2 roll_rate_ki=1
 ./build/host/bin/Debug/autopilot_sim.exe --config logs/c172x_tuned.apcf --mode roll-hold --output logs/configured_roll.csv
 ```
 
@@ -213,47 +223,37 @@ The default roll-hold experiment lasts 20 seconds:
 - At 10 s: command zero bank (wings level).
 - Elevator, rudder, and throttle remain at their original trimmed commands.
 
-The C controller uses:
+Roll hold uses an attitude-to-rate cascade:
 
 ```text
-aileron = aileron_trim + Kp * (limited_bank_command - measured_bank) - Kd * body_roll_rate
+p_target = clamp(attitude_gain * (limited_bank_command - measured_bank), +/-max_rate)
+aileron  = trim + rate_kp * (p_target - measured_p) + rate_integral
 ```
 
-This is **proportional bank-angle control with roll-rate damping**, often called
-PD-like near wings-level flight. It has no integral term, so it is not PI or PID.
-It is not a strict derivative of bank-angle error either: body roll rate `p` is
-only approximately the derivative of Euler bank angle near level flight. Rate
-feedback avoids a derivative kick when the commanded angle steps.
+The outer P loop generates a limited body-rate target; the inner PI loop tracks
+measured body rate. Its integral persists between ticks, stops winding farther
+into an actuator limit, and resets when roll control is disabled. The outer
+mapping is a near-level approximation without yaw coupling; measured `p` is
+never treated as an exact Euler bank-angle derivative.
 
-All angle/rate inputs to the library use radians and radians/second. Aircraft
-parameters live in `sim/include/sim/c172x_config.hpp`, outside the generic C library:
+Settings live in `sim/include/sim/c172x_config.hpp`. The built-in attitude and
+actuator limits remain +/-20 degrees and +/-1 normalized aileron. The saved v1
+`configs/c172x.apcf` retains its +/-0.5 actuator authority and migrates with zero
+rate integral gain; see [configuration migration](docs/configuration.md#legacy-apcf-v1-migration).
 
-| Parameter | Default | Meaning |
-| --- | --- | --- |
-| Kp | 4.0 | Normalized aileron command per radian of bank error |
-| Kd | 0.5 | Normalized aileron command per radian/second of body roll rate |
-| Bank command limit | +/-20 degrees | Limit on the requested reference |
-| Aileron limit | +/-1.0 | Limit on the total command, including trim |
-
-These are the built-in defaults. The previously saved `configs/c172x.apcf`
-retains its +/-0.5 aileron limit; loading it with `--config` uses that saved limit.
-
-The command limit is not a demonstrated flight envelope. Checks so far cover only
-small +/-5-degree commands at the configured C172X cruise condition, with exact
-simulator feedback. There is no integral term, so small residual tracking errors
-can remain. No altitude or coordinated-turn control is active; true-airspeed
-control is a separate mode described below.
-
-For tuning, override the gains explicitly:
+Use the explicit cascade tuning options:
 
 ```powershell
-./build/host/bin/Debug/autopilot_sim.exe --mode roll-hold --roll-kp 4 --roll-kd 0.5
+./build/host/bin/Debug/autopilot_sim.exe --mode roll-hold --roll-attitude-gain 2 --roll-rate-kp 2 --roll-rate-ki 1 --roll-rate-limit-deg-s 57.29578
 ```
 
-Manual mode remains the default. `--aileron-pulse` belongs to manual mode;
-`--bank-deg`, `--roll-kp`, and `--roll-kd` belong to roll-hold mode. Incompatible
-options are rejected. `--duration` changes the total run time but not the 2 s and
-10 s command transitions; use at least 20 s for the complete default experiment.
+Historical `--roll-kp`/`--roll-kd` flags remain available for existing sweep tools:
+they specify the equivalent proportional angle coefficient and inner rate Kp,
+respectively. Prefer the explicit flags above for cascade tuning. Manual mode
+remains the default. The full step-and-return experiment requires at least 20 s.
+See [the cascade guide](docs/cascaded_control.md) for ownership, equations, and
+inner-loop validation before outer-loop tuning. These checks concern the C172X
+simulation operating point; they do not establish a Skyward flight envelope.
 
 ### Plot and measure roll tracking
 
@@ -278,7 +278,8 @@ Overshoot percent uses the actual reference change, including the initial trim
 bank. Endpoint error is command minus measured bank at the last recorded sample;
 it is not a claim of asymptotic steady-state error.
 
-Measured results with the default gains, JSBSim 1.3.1, 100 Hz, 3000 ft MSL and
+Historical results with the previous angle-P/body-rate-damping gains (4, 0.5),
+before the rate PI cascade, JSBSim 1.3.1, 100 Hz, 3000 ft MSL and
 100 kt CAS (no added wind or sensor errors):
 
 | Step | Overshoot | Settling (+/-0.25 deg) | Endpoint error |
@@ -386,12 +387,15 @@ commands trim +2 degrees by default until 10 s, then returns to trim. Aileron,
 rudder, and throttle remain at trim. Pitch hold controls only the pitch axis;
 `attitude-hold` below controls pitch and roll together.
 
-The C law is `elevator = trim - Kp × (pitch_command − pitch) + Kd × q`.
-`q` is body pitch rate, which is only approximately Euler pitch rate outside
-simple attitudes. The C172X gains are Kp = 10 and Kd = 3, with a ±10-degree
-absolute pitch-command limit and ±0.5 normalized elevator limit. The gains
-assume negative elevator command gives nose-up response; verify actuator sign
-again before adapting the library to the Skyward.
+Pitch hold uses the corresponding limited attitude-P -> body-rate-PI cascade:
+`q_target = clamp(attitude_gain * pitch_error, +/-max_rate)` and
+`elevator = trim - (rate_kp * (q_target - measured_q) + rate_integral)`.
+Negative elevator produces nose-up response in this model. The outer mapping
+uses a near-level approximation, and feedback uses measured body `q`. Configure
+`--pitch-attitude-gain`, `--pitch-rate-kp`, `--pitch-rate-ki`, and
+`--pitch-rate-limit-deg-s` independently. Defaults are recorded in the C172X
+configuration header; attitude and elevator limits remain +/-10 degrees and
+0.5 normalized command. Verify actuator direction on each aircraft.
 
 For ±2-degree pitch steps, the current simulation's maximum absolute tracking
 error during 6–10 s and 14–20 s is below 0.5 degree in both directions, without
@@ -419,24 +423,19 @@ From 2–10 s the default commands are +5 degrees bank and trimmed pitch +2
 degrees; after 10 s they return to wings level and trimmed pitch. Both axes
 retain their individual command and actuator limits. `--bank-deg`,
 `--pitch-deg`, and both gain pairs can be overridden in this mode. The optional
-<<<<<<< HEAD
 `--airspeed-kts` accepts any finite positive initial calibrated airspeed in knots.
 The model must trim successfully at that speed before the experiment; otherwise
 the runner reports JSBSim's trim failure and stops. Accepting a speed does not
 establish aircraft capability or controller performance at that speed. This
 option does not hold speed later.
-=======
-`--airspeed-kts` sets initial calibrated airspeed to any finite positive value
-(default 100 kt). The model must successfully trim at that speed before the
-experiment; it does not hold speed later. Roll and pitch plot subtitles show
-the initial true airspeed (TAS) read from the CSV, converted to knots. This can
-differ from the calibrated airspeed (CAS) requested on the command line.
->>>>>>> 36f3872c6ae3bfe42858ffb2e4e4f3d8cfa04251
+Plots identify initial measured true airspeed (TAS) separately from requested
+calibrated airspeed (CAS).
 
-At initial speeds of 90, 100, and 110 kt, the +5/+2-degree simulation had
-maximum bank error below 0.3 degree and pitch error below 0.5 degree during
-the later 6–10 s hold and 14–20 s return intervals. A -5/-2-degree case at
-100 kt also stayed within those bounds. None saturated aileron or elevator.
+Regression checks at initial speeds of 90, 100, and 110 kt require the
++5/+2-degree simulation to keep bank error below 0.5 degree and pitch error
+below 0.6 degree during the later 6–10 s hold and 14–20 s return intervals.
+A -5/-2-degree case at 100 kt uses the same bounds. Both actuator demands
+must remain unsaturated throughout each run.
 These are narrow C172X simulation checks with exact state feedback, not a
 validated flight envelope or Skyward tuning. The plot shows both tracking
 responses, both actuator demands, airspeed, and altitude.
@@ -693,7 +692,7 @@ executable is not sufficient. Initial conditions and property mappings live in
 
 `ap_step(config, input, runtime, output)` is the single entry point for manual,
 attitude, true-airspeed, and altitude modes. Its caller owns and initializes
-`ap_runtime_t`; the runtime is used only by the throttle PI. Inputs include aircraft
+`ap_runtime_t`; it stores roll-rate, pitch-rate, and throttle PI state. Inputs include aircraft
 state, trimmed controls, timestep, explicit mode, and the active setpoints.
 Outputs include bounded actuator commands, effective setpoints, and clipping
 flags. Invalid samples, configuration, modes, and arithmetic overflow return
@@ -720,7 +719,8 @@ invalid inputs, overflow, and mode switching. JSBSim
 integration tests cover trim drift, SI conversion, the open-loop aileron
 response, independent and combined attitude loops, true-airspeed steps,
 altitude steps with a banked segment, and a two-leg mission.
-After splitting the C modules, the manual-run CSV matched the prior run exactly;
+In the earlier C-module split, before introducing the rate PI cascade, the
+manual-run CSV matched the prior run exactly;
 the roll-run state and command differences from floating-point evaluation order
 were below 0.000004 degrees of bank and 0.0000002 normalized aileron command.
 

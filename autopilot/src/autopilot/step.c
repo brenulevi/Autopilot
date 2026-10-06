@@ -1,11 +1,7 @@
 #include "autopilot/autopilot.h"
 #include "control/manual.h"
-#include "control/roll.h"
-#include "control/pitch.h"
-#include "control/airspeed.h"
 #include "guidance/bank_limit.h"
 #include "guidance/pitch_limit.h"
-#include "guidance/altitude.h"
 
 #include <math.h>
 #include <stddef.h>
@@ -23,7 +19,7 @@ static bool valid_sample(const ap_input_t *input)
 }
 
 static bool ap_step_attitude(const ap_config_t *config, const ap_input_t *input,
-                             ap_output_t *output)
+                             ap_runtime_t *runtime, ap_output_t *output)
 {
     if (input == NULL || output == NULL || !valid_sample(input)) return false;
 
@@ -33,24 +29,60 @@ static bool ap_step_attitude(const ap_config_t *config, const ap_input_t *input,
 
     switch (input->mode) {
     case AP_MODE_MANUAL:
+        runtime->roll.integral_norm = 0.0f;
+        runtime->pitch.integral_norm = 0.0f;
         break;
     case AP_MODE_ROLL_HOLD:
     case AP_MODE_PITCH_HOLD:
     case AP_MODE_ATTITUDE_HOLD:
         if (config == NULL) return false;
+        if (input->mode == AP_MODE_PITCH_HOLD) runtime->roll.integral_norm = 0.0f;
+        if (input->mode == AP_MODE_ROLL_HOLD) runtime->pitch.integral_norm = 0.0f;
         if (input->mode != AP_MODE_PITCH_HOLD) {
-            if (!ap_guidance_limit_bank(input->bank_command_rad, config->max_bank_rad,
-                                        &result.bank_command_rad, &result.bank_command_limited) ||
-                !ap_roll_compute(config, &input->state, result.bank_command_rad,
-                                 input->requested.aileron, &result.controls.aileron,
-                                 &result.aileron_saturated)) return false;
+            if (!ap_guidance_limit_bank(input->bank_command_rad,
+                                        config->attitude_limits.max_bank_rad,
+                                        &result.bank_command_rad,
+                                        &result.bank_command_limited)) return false;
+            const ap_roll_attitude_input_t attitude = {
+                input->state.roll_rad, result.bank_command_rad
+            };
+            ap_roll_attitude_output_t reference;
+            if (!ap_roll_attitude_compute(&config->roll.attitude, &attitude, &reference)) return false;
+            const ap_roll_rate_input_t rate_input = {
+                input->state.p_rad_s, reference.body_rate_command_rad_s,
+                input->requested.aileron, input->dt_s
+            };
+            ap_roll_rate_output_t rate_output;
+            if (!ap_roll_rate_compute(&config->roll.rate, &rate_input,
+                                        &runtime->roll, &rate_output)) return false;
+            result.controls.aileron = rate_output.aileron_norm;
+            result.aileron_saturated = rate_output.saturated;
+            result.roll_rate_command_rad_s = reference.body_rate_command_rad_s;
+            result.roll_rate_error_rad_s = rate_output.error_rad_s;
+            result.roll_rate_limited = reference.limited;
         }
         if (input->mode != AP_MODE_ROLL_HOLD) {
-            if (!ap_guidance_limit_pitch(input->pitch_command_rad, config->max_pitch_rad,
-                                         &result.pitch_command_rad, &result.pitch_command_limited) ||
-                !ap_pitch_compute(config, &input->state, result.pitch_command_rad,
-                                  input->requested.elevator, &result.controls.elevator,
-                                  &result.elevator_saturated)) return false;
+            if (!ap_guidance_limit_pitch(input->pitch_command_rad,
+                                         config->attitude_limits.max_pitch_rad,
+                                         &result.pitch_command_rad,
+                                         &result.pitch_command_limited)) return false;
+            const ap_pitch_attitude_input_t attitude = {
+                input->state.pitch_rad, result.pitch_command_rad
+            };
+            ap_pitch_attitude_output_t reference;
+            if (!ap_pitch_attitude_compute(&config->pitch.attitude, &attitude, &reference)) return false;
+            const ap_pitch_rate_input_t rate_input = {
+                input->state.q_rad_s, reference.body_rate_command_rad_s,
+                input->requested.elevator, input->dt_s
+            };
+            ap_pitch_rate_output_t rate_output;
+            if (!ap_pitch_rate_compute(&config->pitch.rate, &rate_input,
+                                        &runtime->pitch, &rate_output)) return false;
+            result.controls.elevator = rate_output.elevator_norm;
+            result.elevator_saturated = rate_output.saturated;
+            result.pitch_rate_command_rad_s = reference.body_rate_command_rad_s;
+            result.pitch_rate_error_rad_s = rate_output.error_rad_s;
+            result.pitch_rate_limited = reference.limited;
         }
         break;
     default:
@@ -70,8 +102,8 @@ bool ap_step(const ap_config_t *config, const ap_input_t *input,
 
     if (input->mode != AP_MODE_ATTITUDE_AIRSPEED_HOLD &&
         input->mode != AP_MODE_ALTITUDE_AIRSPEED_HOLD) {
-        if (!ap_step_attitude(config, input, &result)) return false;
-        next_runtime.airspeed_integral_norm = 0.0f;
+        if (!ap_step_attitude(config, input, &next_runtime, &result)) return false;
+        next_runtime.airspeed.integral_norm = 0.0f;
         *output = result;
         *runtime = next_runtime;
         return true;
@@ -80,11 +112,34 @@ bool ap_step(const ap_config_t *config, const ap_input_t *input,
     ap_input_t attitude_input = *input;
     attitude_input.mode = AP_MODE_ATTITUDE_HOLD;
     bool altitude_pitch_limited = false;
-    if (input->mode == AP_MODE_ALTITUDE_AIRSPEED_HOLD &&
-        !ap_guidance_altitude(config, input, &attitude_input.pitch_command_rad,
-                              &altitude_pitch_limited)) return false;
-    if (!ap_step_attitude(config, &attitude_input, &result) ||
-        !ap_airspeed_compute(config, input, &next_runtime, &result)) return false;
+    if (input->mode == AP_MODE_ALTITUDE_AIRSPEED_HOLD) {
+        if (config == NULL) return false;
+        const ap_altitude_input_t altitude_input = {
+            .measured_altitude_m = input->state.altitude_m,
+            .measured_climb_rate_m_s = input->state.climb_rate_m_s,
+            .target_altitude_m = input->altitude_command_m,
+            .trim_pitch_rad = input->pitch_command_rad
+        };
+        ap_altitude_output_t altitude_output;
+        if (!ap_guidance_altitude(&config->altitude, &altitude_input,
+                                  &altitude_output)) return false;
+        attitude_input.pitch_command_rad = altitude_output.pitch_command_rad;
+        altitude_pitch_limited = altitude_output.limited;
+    }
+    if (!ap_step_attitude(config, &attitude_input, &next_runtime, &result)) return false;
+    const ap_airspeed_input_t airspeed_input = {
+        .measured_airspeed_m_s = input->state.airspeed_m_s,
+        .target_airspeed_m_s = input->airspeed_command_m_s,
+        .trim_throttle_norm = input->requested.throttle,
+        .dt_s = input->dt_s
+    };
+    ap_airspeed_output_t airspeed_output;
+    if (!ap_airspeed_compute(&config->airspeed, &airspeed_input,
+                             &next_runtime.airspeed, &airspeed_output)) return false;
+    result.controls.throttle = airspeed_output.throttle_norm;
+    result.airspeed_command_m_s = input->airspeed_command_m_s;
+    result.airspeed_error_m_s = airspeed_output.error_m_s;
+    result.throttle_saturated = airspeed_output.saturated;
 
     if (input->mode == AP_MODE_ALTITUDE_AIRSPEED_HOLD) {
         result.altitude_command_m = input->altitude_command_m;
@@ -95,4 +150,19 @@ bool ap_step(const ap_config_t *config, const ap_input_t *input,
     *output = result;
     *runtime = next_runtime;
     return true;
+}
+
+bool ap_controller_init(ap_controller_t *controller, const ap_config_t *config)
+{
+    if (controller == NULL || !ap_control_config_validate(config)) return false;
+    const ap_controller_t next = {.config = *config, .runtime = {0}};
+    *controller = next;
+    return true;
+}
+
+bool ap_controller_step(ap_controller_t *controller, const ap_input_t *input,
+                        ap_output_t *output)
+{
+    if (controller == NULL) return false;
+    return ap_step(&controller->config, input, &controller->runtime, output);
 }

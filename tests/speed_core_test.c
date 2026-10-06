@@ -9,9 +9,12 @@
 
 int main(void)
 {
-    ap_config_t config = {2.0f, 0.3f, 0.35f, 0.5f,
-                          3.0f, 0.5f, 0.2f, 0.5f,
-                          0.1f, 0.05f, 0.2f, 0.8f};
+    ap_config_t config = {
+        .roll = {{2.0f / 0.3f, 10.0f}, {0.3f, 0.0f, 0.5f}},
+        .pitch = {{6.0f, 10.0f}, {0.5f, 0.0f, 0.5f}},
+        .airspeed = {0.1f, 0.05f, 0.2f, 0.8f},
+        .attitude_limits = {0.35f, 0.2f}
+    };
     ap_input_t input = {0};
     input.mode = AP_MODE_ATTITUDE_AIRSPEED_HOLD;
     input.dt_s = 1.0f;
@@ -24,38 +27,38 @@ int main(void)
     CHECK(!ap_step(&config, &input, NULL, &output));
     CHECK(ap_step(&config, &input, &runtime, &output));
     CHECK(output.controls.throttle > 0.64f && output.controls.throttle < 0.66f);
-    CHECK(runtime.airspeed_integral_norm > 0.049f && runtime.airspeed_integral_norm < 0.051f);
+    CHECK(runtime.airspeed.integral_norm > 0.049f && runtime.airspeed.integral_norm < 0.051f);
     CHECK(output.airspeed_error_m_s == 1.0f && !output.throttle_saturated);
     CHECK(ap_step(&config, &input, &runtime, &output));
     CHECK(output.controls.throttle > 0.69f && output.controls.throttle < 0.71f);
 
-    const float held_integral = runtime.airspeed_integral_norm;
+    const float held_integral = runtime.airspeed.integral_norm;
     input.airspeed_command_m_s = 100.0f;
     for (int i = 0; i < 10; ++i) {
         CHECK(ap_step(&config, &input, &runtime, &output));
         CHECK(output.controls.throttle == 0.8f && output.throttle_saturated);
-        CHECK(runtime.airspeed_integral_norm == held_integral);
+        CHECK(runtime.airspeed.integral_norm == held_integral);
     }
     input.airspeed_command_m_s = 1.0f;
     CHECK(ap_step(&config, &input, &runtime, &output));
     CHECK(output.controls.throttle == 0.2f && output.throttle_saturated);
-    CHECK(runtime.airspeed_integral_norm == held_integral);
+    CHECK(runtime.airspeed.integral_norm == held_integral);
 
     /* Once back inside the actuator range, integration can unwind. */
     input.airspeed_command_m_s = 49.9f;
     CHECK(ap_step(&config, &input, &runtime, &output));
-    CHECK(runtime.airspeed_integral_norm < held_integral);
+    CHECK(runtime.airspeed.integral_norm < held_integral);
 
     const ap_output_t previous = output;
-    const float previous_integral = runtime.airspeed_integral_norm;
-    config.airspeed_ki = NAN;
+    const float previous_integral = runtime.airspeed.integral_norm;
+    config.airspeed.ki = NAN;
     CHECK(!ap_step(&config, &input, &runtime, &output));
-    CHECK(runtime.airspeed_integral_norm == previous_integral);
+    CHECK(runtime.airspeed.integral_norm == previous_integral);
     CHECK(output.controls.throttle == previous.controls.throttle);
-    config.airspeed_ki = 0.05f;
+    config.airspeed.ki = 0.05f;
     input.mode = AP_MODE_MANUAL;
     CHECK(ap_step(NULL, &input, &runtime, &output));
-    CHECK(runtime.airspeed_integral_norm == 0.0f);
+    CHECK(runtime.airspeed.integral_norm == 0.0f);
     CHECK(output.controls.throttle == 0.5f);
     return 0;
 }

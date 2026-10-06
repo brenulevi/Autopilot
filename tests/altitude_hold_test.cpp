@@ -46,7 +46,7 @@ void run_case(const char* root, double step_m, double turn_bank_deg)
               "Altitude error has incorrect sign");
         check(output.controls.throttle >= 0.0f && output.controls.throttle <= 1.0f,
               "Throttle command out of range");
-        check(std::abs(output.controls.elevator) <= config.max_elevator,
+        check(std::abs(output.controls.elevator) <= config.pitch.rate.max_elevator_norm,
               "Elevator command out of range");
         if (time > 3.0 && time < 10.0 &&
             state.climb_rate_m_s * step_m > 0.25) saw_positive_climb = true;

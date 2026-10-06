@@ -43,9 +43,9 @@ void run(const char* root, const std::filesystem::path& directory, const Case& t
     for(int k=0;k<70000;++k) {
         const auto state=aircraft.state(); const auto nav=aircraft.navigation_state();
         ap_mission_output_t guidance{};
-        check(ap_mission_step(&mission,&nav,4,config.max_bank_rad,&runtime,&guidance),"Turn guidance rejected mission/state");
+        check(ap_mission_step(&mission,&nav,4,config.attitude_limits.max_bank_rad,&runtime,&guidance),"Turn guidance rejected mission/state");
         check(guidance.leg_index>=previous,"Mission leg went backwards"); previous=guidance.leg_index;
-        check(std::abs(guidance.bank_command_rad)<=config.max_bank_rad,"Turn exceeded bank command limit");
+        check(std::abs(guidance.bank_command_rad)<=config.attitude_limits.max_bank_rad,"Turn exceeded bank command limit");
         for(unsigned w=1;w<mission.count-1;++w) {
             const auto& b=mission.waypoints[w]; const auto& a=mission.waypoints[w-1];
             const double distance=std::hypot(guidance.north_m-b.north_m,guidance.east_m-b.east_m);

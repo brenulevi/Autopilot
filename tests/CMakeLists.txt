@@ -30,6 +30,16 @@ target_link_libraries(autopilot_core_test PRIVATE Autopilot::Core)
 set_target_properties(autopilot_core_test PROPERTIES C_STANDARD 11 C_STANDARD_REQUIRED YES C_EXTENSIONS NO)
 autopilot_warnings(autopilot_core_test)
 add_test(NAME autopilot.core COMMAND autopilot_core_test)
+add_executable(controller_core_test controller_core_test.c)
+target_link_libraries(controller_core_test PRIVATE Autopilot::Core)
+set_target_properties(controller_core_test PROPERTIES C_STANDARD 11 C_STANDARD_REQUIRED YES C_EXTENSIONS NO)
+autopilot_warnings(controller_core_test)
+add_test(NAME autopilot.controller_core COMMAND controller_core_test)
+add_executable(cascade_core_test cascade_core_test.c)
+target_link_libraries(cascade_core_test PRIVATE Autopilot::Core)
+set_target_properties(cascade_core_test PROPERTIES C_STANDARD 11 C_STANDARD_REQUIRED YES C_EXTENSIONS NO)
+autopilot_warnings(cascade_core_test)
+add_test(NAME autopilot.cascade_core COMMAND cascade_core_test)
 add_executable(config_core_test config_core_test.c)
 target_link_libraries(config_core_test PRIVATE Autopilot::Core)
 set_target_properties(config_core_test PROPERTIES C_STANDARD 11 C_STANDARD_REQUIRED YES C_EXTENSIONS NO)
@@ -70,6 +80,12 @@ autopilot_warnings(mission_turn_core_test)
 add_test(NAME autopilot.mission_turn_core COMMAND mission_turn_core_test)
 
 if(AUTOPILOT_BUILD_SIM)
+    add_executable(rate_loop_test rate_loop_test.cpp)
+    target_link_libraries(rate_loop_test PRIVATE Autopilot::JSBSimAdapter)
+    autopilot_warnings(rate_loop_test)
+    add_test(NAME autopilot.rate_loop COMMAND rate_loop_test "${AUTOPILOT_JSBSIM_DATA_DIR}"
+        "${CMAKE_BINARY_DIR}/rate_loop_logs")
+    set_tests_properties(autopilot.rate_loop PROPERTIES TIMEOUT 90)
     add_executable(mission_turn_test mission_turn_test.cpp)
     target_link_libraries(mission_turn_test PRIVATE Autopilot::JSBSimAdapter)
     autopilot_warnings(mission_turn_test)
@@ -89,10 +105,17 @@ if(AUTOPILOT_BUILD_SIM)
     set_tests_properties(flight_io.c172x_takeover PROPERTIES TIMEOUT 60)
     find_package(Python3 QUIET COMPONENTS Interpreter)
     if(Python3_Interpreter_FOUND)
-        add_test(NAME autopilot.config_file
-            COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/test_config_file.py"
-                --tool "$<TARGET_FILE:autopilot_config>" --sim "$<TARGET_FILE:autopilot_sim>")
-        set_tests_properties(autopilot.config_file PROPERTIES TIMEOUT 90)
+        # Isolated temporary directories let independent config cases run in parallel.
+        foreach(config_case IN ITEMS attitude_limit_overrides wire_format_and_edit
+                bad_records_and_parameters simulator_configuration_and_override_precedence
+                mission_uses_loaded_l1 legacy_v1_migration explicit_rate_limits_and_telemetry)
+            add_test(NAME autopilot.config_file.${config_case}
+                COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/test_config_file.py"
+                    --tool "$<TARGET_FILE:autopilot_config>" --sim "$<TARGET_FILE:autopilot_sim>"
+                    "ConfigFileTest.test_${config_case}")
+            # Windows executable startup can dominate the many rejection checks.
+            set_tests_properties(autopilot.config_file.${config_case} PROPERTIES TIMEOUT 600)
+        endforeach()
     endif()
     add_executable(sim_integration_test sim_integration_test.cpp)
     target_link_libraries(sim_integration_test PRIVATE Autopilot::JSBSimAdapter)

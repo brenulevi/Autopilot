@@ -9,10 +9,13 @@
 
 int main(void)
 {
-    ap_config_t config = {2.0f, 0.3f, 0.35f, 0.5f,
-                          3.0f, 0.5f, 0.2f, 0.5f,
-                          0.1f, 0.05f, 0.2f, 0.8f,
-                          0.015f, 0.05f, 0.06f};
+    ap_config_t config = {
+        .roll = {{2.0f / 0.3f, 10.0f}, {0.3f, 0.0f, 0.5f}},
+        .pitch = {{6.0f, 10.0f}, {0.5f, 0.0f, 0.5f}},
+        .airspeed = {0.1f, 0.05f, 0.2f, 0.8f},
+        .altitude = {0.015f, 0.05f, 0.06f},
+        .attitude_limits = {0.35f, 0.2f}
+    };
     ap_input_t input = {0};
     input.mode = AP_MODE_ALTITUDE_AIRSPEED_HOLD;
     input.dt_s = 0.01f;
@@ -48,20 +51,20 @@ int main(void)
     CHECK(output.altitude_pitch_limited);
 
     const ap_output_t previous = output;
-    const float previous_integral = runtime.airspeed_integral_norm;
-    config.altitude_gain = NAN;
+    const float previous_integral = runtime.airspeed.integral_norm;
+    config.altitude.altitude_gain = NAN;
     CHECK(!ap_step(&config, &input, &runtime, &output));
     CHECK(output.pitch_command_rad == previous.pitch_command_rad);
-    CHECK(runtime.airspeed_integral_norm == previous_integral);
-    config.altitude_gain = 0.015f;
+    CHECK(runtime.airspeed.integral_norm == previous_integral);
+    config.altitude.altitude_gain = 0.015f;
     input.state.climb_rate_m_s = NAN;
     CHECK(!ap_step(&config, &input, &runtime, &output));
     CHECK(output.pitch_command_rad == previous.pitch_command_rad);
-    CHECK(runtime.airspeed_integral_norm == previous_integral);
+    CHECK(runtime.airspeed.integral_norm == previous_integral);
     input.state.climb_rate_m_s = 0.0f;
     input.altitude_command_m = NAN;
     CHECK(!ap_step(&config, &input, &runtime, &output));
     CHECK(output.pitch_command_rad == previous.pitch_command_rad);
-    CHECK(runtime.airspeed_integral_norm == previous_integral);
+    CHECK(runtime.airspeed.integral_norm == previous_integral);
     return 0;
 }
