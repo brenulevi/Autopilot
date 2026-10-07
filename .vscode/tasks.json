@@ -1,0 +1,49 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "Configure host simulator",
+      "type": "process",
+      "command": "cmake",
+      "args": ["--preset", "host"],
+      "options": { "cwd": "${workspaceFolder}" },
+      "problemMatcher": []
+    },
+    {
+      "label": "Build host simulator",
+      "type": "process",
+      "command": "cmake",
+      "args": ["--build", "--preset", "host"],
+      "options": { "cwd": "${workspaceFolder}" },
+      "dependsOn": "Configure host simulator",
+      "problemMatcher": "$gcc"
+    },
+    {
+      "label": "Run roll hold",
+      "type": "process",
+      "command": "${workspaceFolder}/build/host-scaffold/sim/attitude_hold_sim",
+      "args": ["--mode", "roll", "--bank-deg", "5", "--output", "logs/c172x_roll_hold.csv"],
+      "options": { "cwd": "${workspaceFolder}" },
+      "dependsOn": "Build host simulator",
+      "problemMatcher": []
+    },
+    {
+      "label": "Run pitch hold",
+      "type": "process",
+      "command": "${workspaceFolder}/build/host-scaffold/sim/attitude_hold_sim",
+      "args": ["--mode", "pitch", "--pitch-offset-deg", "2", "--duration", "60", "--output", "logs/c172x_pitch_hold.csv"],
+      "options": { "cwd": "${workspaceFolder}" },
+      "dependsOn": "Build host simulator",
+      "problemMatcher": []
+    },
+    {
+      "label": "Run airspeed hold",
+      "type": "process",
+      "command": "${workspaceFolder}/build/host-scaffold/sim/attitude_hold_sim",
+      "args": ["--mode", "airspeed", "--airspeed-offset-kts", "5", "--duration", "60", "--output", "logs/c172x_airspeed_hold.csv"],
+      "options": { "cwd": "${workspaceFolder}" },
+      "dependsOn": "Build host simulator",
+      "problemMatcher": []
+    }
+  ]
+}

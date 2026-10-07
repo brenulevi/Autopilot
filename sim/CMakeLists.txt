@@ -1,0 +1,26 @@
+# Keep optional upstream tools out of this small simulator build.
+set(BUILD_DOCS OFF CACHE BOOL "" FORCE)
+set(BUILD_PYTHON_MODULE OFF CACHE BOOL "" FORCE)
+set(BUILD_JULIA_PACKAGE OFF CACHE BOOL "" FORCE)
+set(BUILD_MATLAB_SFUNCTION OFF CACHE BOOL "" FORCE)
+set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
+set(CMAKE_DISABLE_FIND_PACKAGE_CxxTest TRUE)
+
+set(JSBSIM_SOURCE_DIR "${CMAKE_SOURCE_DIR}/third_party/jsbsim")
+if(NOT EXISTS "${JSBSIM_SOURCE_DIR}/src/FGFDMExec.h")
+    message(FATAL_ERROR "JSBSim submodule is missing. Run: git submodule update --init --recursive")
+endif()
+add_subdirectory("${JSBSIM_SOURCE_DIR}" "${CMAKE_BINARY_DIR}/_deps/jsbsim-build" EXCLUDE_FROM_ALL)
+
+add_library(jsbsim_adapter STATIC src/jsbsim_adapter.cpp)
+target_include_directories(jsbsim_adapter PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include")
+target_compile_features(jsbsim_adapter PUBLIC cxx_std_17)
+set_target_properties(jsbsim_adapter PROPERTIES CXX_EXTENSIONS NO)
+target_link_libraries(jsbsim_adapter PUBLIC Autopilot::Core PRIVATE libJSBSim)
+
+configure_file(sim_config.h.in "${CMAKE_CURRENT_BINARY_DIR}/generated/sim_config.h" @ONLY)
+add_executable(attitude_hold_sim src/main.cpp)
+target_include_directories(attitude_hold_sim PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/generated")
+target_link_libraries(attitude_hold_sim PRIVATE jsbsim_adapter)
+target_compile_features(attitude_hold_sim PRIVATE cxx_std_17)
+set_target_properties(attitude_hold_sim PROPERTIES CXX_EXTENSIONS NO)

@@ -1,0 +1,65 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Run and plot roll hold",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/tools/plot_attitude.py",
+      "args": ["--mode", "roll", "--show"],
+      "cwd": "${workspaceFolder}",
+      "console": "integratedTerminal",
+      "preLaunchTask": "Run roll hold"
+    },
+    {
+      "name": "Run and plot pitch hold",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/tools/plot_attitude.py",
+      "args": ["--mode", "pitch", "--show"],
+      "cwd": "${workspaceFolder}",
+      "console": "integratedTerminal",
+      "preLaunchTask": "Run pitch hold"
+    },
+    {
+      "name": "Run and plot airspeed hold",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/tools/plot_attitude.py",
+      "args": ["--mode", "airspeed", "--show"],
+      "cwd": "${workspaceFolder}",
+      "console": "integratedTerminal",
+      "preLaunchTask": "Run airspeed hold"
+    },
+    {
+      "name": "Debug roll hold simulator",
+      "type": "cppdbg",
+      "request": "launch",
+      "program": "${workspaceFolder}/build/host-scaffold/sim/attitude_hold_sim",
+      "args": ["--mode", "roll", "--bank-deg", "5"],
+      "cwd": "${workspaceFolder}",
+      "MIMode": "gdb",
+      "preLaunchTask": "Build host simulator"
+    },
+    {
+      "name": "Debug pitch hold simulator",
+      "type": "cppdbg",
+      "request": "launch",
+      "program": "${workspaceFolder}/build/host-scaffold/sim/attitude_hold_sim",
+      "args": ["--mode", "pitch", "--pitch-offset-deg", "2", "--duration", "60"],
+      "cwd": "${workspaceFolder}",
+      "MIMode": "gdb",
+      "preLaunchTask": "Build host simulator"
+    },
+    {
+      "name": "Debug airspeed hold simulator",
+      "type": "cppdbg",
+      "request": "launch",
+      "program": "${workspaceFolder}/build/host-scaffold/sim/attitude_hold_sim",
+      "args": ["--mode", "airspeed", "--airspeed-offset-kts", "5", "--duration", "60"],
+      "cwd": "${workspaceFolder}",
+      "MIMode": "gdb",
+      "preLaunchTask": "Build host simulator"
+    }
+  ]
+}

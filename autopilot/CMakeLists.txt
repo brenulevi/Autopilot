@@ -1,4 +1,5 @@
-add_library(autopilot STATIC src/scaffold.c)
+add_library(autopilot STATIC src/autopilot.c src/control/roll.c src/control/pitch.c
+    src/control/airspeed.c)
 add_library(Autopilot::Core ALIAS autopilot)
 
 target_include_directories(autopilot PUBLIC

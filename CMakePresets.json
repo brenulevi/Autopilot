@@ -8,14 +8,27 @@
       "binaryDir": "${sourceDir}/build/core-scaffold",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Debug",
-        "BUILD_TESTING": "ON"
+        "BUILD_TESTING": "ON",
+        "AUTOPILOT_BUILD_SIM": "OFF"
+      }
+    },
+    {
+      "name": "host",
+      "displayName": "C172X JSBSim controller experiments",
+      "binaryDir": "${sourceDir}/build/host-scaffold",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "BUILD_TESTING": "ON",
+        "AUTOPILOT_BUILD_SIM": "ON"
       }
     }
   ],
   "buildPresets": [
-    { "name": "core", "configurePreset": "core" }
+    { "name": "core", "configurePreset": "core" },
+    { "name": "host", "configurePreset": "host" }
   ],
   "testPresets": [
-    { "name": "core", "configurePreset": "core", "output": { "outputOnFailure": true } }
+    { "name": "core", "configurePreset": "core", "output": { "outputOnFailure": true } },
+    { "name": "host", "configurePreset": "host", "output": { "outputOnFailure": true } }
   ]
 }
